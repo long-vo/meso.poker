@@ -21,6 +21,7 @@
   --j-num: #d2a8ff;
   --j-bool: #ffa657;
   --j-null: #ff7b72;
+  --on-accent: #fff;
   --radius: 12px;
   --radius-sm: 8px;
   --panel-max: 1040px;
@@ -37,7 +38,7 @@
   --border-strong: #cdd4df;
   --text: #1b2430;
   --text-dim: #556072;
-  --text-faint: #8a95a6;
+  --text-faint: #75818f;
   --accent: #2f6fed;
   --accent-2: #6b4dff;
   --good: #1a7f37;
@@ -58,7 +59,7 @@
 }
 
 /* The `hidden` attribute must always win, even over display:flex rules
-   (used to hide the poker table, results row and status pill until relevant). */
+   (used to hide the poker table and status pill until relevant). */
 [hidden] {
   display: none !important;
 }
@@ -103,9 +104,12 @@ body {
   align-items: center;
   gap: 12px;
 }
+/* the mesoneer logo tile, sized to match the old emoji mark */
 .brand-mark {
-  font-size: 26px;
-  filter: saturate(1.2);
+  width: 44px;
+  height: 44px;
+  border-radius: 8px;
+  display: block;
 }
 .brand-text {
   display: flex;
@@ -141,22 +145,6 @@ body {
   font-size: 13.5px;
   font-weight: 600;
   white-space: nowrap;
-}
-
-/* centered brand logo in the topbar (square tile with its own background) */
-.topbar-logo {
-  position: absolute;
-  left: 50%;
-  transform: translateX(-50%);
-  height: 38px;
-  width: 38px;
-  border-radius: 9px;
-  display: block;
-}
-@media (max-width: 640px) {
-  .topbar-logo {
-    display: none;
-  }
 }
 
 .topbar-actions {
@@ -235,7 +223,7 @@ body {
 }
 a.card:hover {
   border-color: var(--accent);
-  transform: translateY(-2px);
+  transform: translateY(-1px);
 }
 
 .card-head {
@@ -304,9 +292,18 @@ a.card:hover .card-go {
 
 /* ---- scrum poker ---- */
 .poker {
-  max-width: 1360px;
+  max-width: 1440px;
   margin: 0 auto;
   padding: 26px clamp(16px, 4vw, 40px) 8px;
+}
+/* While a PO is watching (body.has-observers, toggled by the client), the
+   pinned observer panel gets its own right-hand lane: the table cedes the
+   panel's width instead of being covered by it. Below 1100px the panel
+   overlays the content, like the pick panel. */
+@media (min-width: 1100px) {
+  body.has-observers .poker {
+    padding-right: calc(clamp(16px, 4vw, 40px) + 120px);
+  }
 }
 /* Two columns: room controls (table-bar + story) on the left, the play
    area (players, deck, wheel) on the right. Each side stacks its panels
@@ -353,7 +350,7 @@ a.card:hover .card-go {
 .btn.btn-primary {
   background: var(--accent);
   border-color: var(--accent);
-  color: #fff;
+  color: var(--on-accent);
 }
 .btn.btn-primary:hover {
   border-color: var(--accent);
@@ -439,7 +436,7 @@ a.card:hover .card-go {
 .player.me .player-name .you {
   display: inline-block;
   background: var(--accent-2);
-  color: #fff;
+  color: var(--on-accent);
   font-weight: 700;
   font-size: 10.5px;
   letter-spacing: 0.4px;
@@ -490,15 +487,28 @@ a.card:hover .card-go {
   box-shadow: none;
 }
 
+/* Always in the flow with a reserved height, so revealing / starting a new
+   round never changes the panel height. Chips stay on one scrollable row for
+   the same reason: a wide vote spread must not wrap into a second line. */
 .results {
   margin-top: 16px;
   padding-top: 14px;
   border-top: 1px solid var(--border);
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+  overflow-x: auto;
   align-items: center;
   gap: 10px 16px;
   font-size: 13.5px;
+  min-height: 48px;
+}
+.results .hint {
+  margin: 0;
+  white-space: nowrap;
+}
+.dist-chip,
+.consensus {
+  white-space: nowrap;
 }
 .dist-chip {
   font-size: 15px;
@@ -541,7 +551,7 @@ a.card:hover .card-go {
 .deck-card.selected {
   background: var(--card-accent, var(--accent));
   border-color: var(--card-accent, var(--accent));
-  color: #fff;
+  color: var(--on-accent);
   transform: translateY(-5px);
   box-shadow: var(--shadow);
 }
@@ -629,7 +639,7 @@ a.card:hover .card-go {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  margin-top: 7px;
+  margin-top: 8px;
 }
 .deck-foot .hint {
   margin: 0;
@@ -637,7 +647,7 @@ a.card:hover .card-go {
 .theme-dots {
   display: flex;
   align-items: center;
-  gap: 7px;
+  gap: 8px;
 }
 .theme-dot {
   width: 18px;
@@ -734,7 +744,7 @@ a.card:hover .card-go {
   stroke-width: 1;
 }
 .wheel-label {
-  fill: #fff;
+  fill: var(--on-accent);
   font-family: var(--sans);
   font-weight: 600;
   paint-order: stroke;
@@ -764,7 +774,7 @@ button.wheel-chip {
   font-family: var(--mono);
   display: inline-flex;
   align-items: center;
-  gap: 5px;
+  gap: 4px;
 }
 .chip-dot {
   width: 8px;
@@ -858,6 +868,42 @@ button.wheel-chip:hover .chip-x {
   }
   .pick-panel.show {
     transform: translateX(0);
+  }
+}
+
+/* persistent observer notice: pinned top-right (under the topbar) while a
+   PO/observer is in the room; removed by the client when the last one leaves */
+.observer-panel {
+  position: fixed;
+  top: 86px;
+  right: 22px;
+  z-index: 20;
+  min-width: 190px;
+  max-width: 260px;
+  padding: 18px 20px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  transform: translateX(120%);
+  opacity: 0;
+  transition: transform 0.35s cubic-bezier(0.2, 0.9, 0.3, 1.1), opacity 0.35s;
+}
+.observer-panel.show {
+  transform: translateX(0);
+  opacity: 1;
+}
+/* names match the pick panel's announcement type */
+.observer-names {
+  margin-top: 6px;
+  font-size: 22px;
+  font-weight: 800;
+  word-break: break-word;
+}
+
+@media (max-width: 720px) {
+  .observer-panel {
+    right: 12px;
   }
 }
 
@@ -957,7 +1003,7 @@ button.wheel-chip:hover .chip-x {
 }
 .mode-btn.is-active {
   background: var(--accent);
-  color: #fff;
+  color: var(--on-accent);
 }
 
 /* mode-scoped visibility */
@@ -1005,7 +1051,7 @@ input:disabled {
 label {
   display: block;
   font-weight: 600;
-  margin-bottom: 7px;
+  margin-bottom: 8px;
   font-size: 13.5px;
 }
 
@@ -1032,7 +1078,7 @@ textarea:focus {
 .hint {
   color: var(--text-faint);
   font-size: 12px;
-  margin: 7px 0 0;
+  margin: 8px 0 0;
 }
 .hint code,
 .footer code,
@@ -1056,7 +1102,7 @@ textarea:focus {
   border: 1px solid var(--border-strong);
   color: var(--text-dim);
   background: var(--bg-inset);
-  transition: all 0.15s;
+  transition: border-color 0.15s, color 0.15s, background 0.15s, opacity 0.15s;
 }
 .chip.matched {
   color: var(--mask);
@@ -1174,7 +1220,7 @@ textarea:focus {
 
 .error-line {
   color: var(--danger);
-  font-size: 12.5px;
+  font-size: 12px;
   margin: 8px 0 0;
   min-height: 1em;
   font-family: var(--mono);
@@ -1218,8 +1264,6 @@ textarea:focus {
 .api {
   max-width: 1440px;
   margin: 0 auto 8px;
-}
-.api {
   margin-left: clamp(16px, 4vw, 40px);
   margin-right: clamp(16px, 4vw, 40px);
 }
@@ -1238,7 +1282,7 @@ textarea:focus {
 .footer {
   text-align: center;
   color: var(--text-faint);
-  font-size: 12.5px;
+  font-size: 12px;
   padding: 22px 20px 40px;
 }
 

@@ -60,6 +60,8 @@ const els = {
   pickPanel: $("pick-panel"),
   pickClose: $("pick-close"),
   pickName: $("pick-name"),
+  observerPanel: $("observer-panel"),
+  observerNames: $("observer-names"),
   cardThemes: $("card-themes"),
 };
 
@@ -377,11 +379,40 @@ function renderPlayers(state) {
   }
 }
 
+/* Persistent notice while observers (PO) watch the room: slides in when the
+   first observer joins, updates as the list changes, slides out with the last.
+   Purely derived from room state, so join/leave in live and solo mode both
+   update it without extra wiring. */
+let observerKey = "";
+
+function renderObservers(state) {
+  const observers = state.participants.filter((p) => p.observer);
+  const key = observers.map((p) => p.name).join("\n");
+  if (key === observerKey) return;
+  observerKey = key;
+  // Reserve (or release) the right-hand lane the pinned panel sits in.
+  document.body.classList.toggle("has-observers", observers.length > 0);
+  if (observers.length === 0) {
+    els.observerPanel.hidden = true;
+    els.observerPanel.classList.remove("show");
+    return;
+  }
+  els.observerNames.innerHTML = observers
+    .map((p) => `👁 ${escapeHtml(p.name)}`)
+    .join("<br />");
+  els.observerPanel.hidden = false;
+  els.observerPanel.classList.remove("show");
+  // Force a style flush so re-adding the class replays the slide-in.
+  void els.observerPanel.getBoundingClientRect();
+  els.observerPanel.classList.add("show");
+}
+
 function renderResults(state) {
   const stats = state.stats;
+  // The strip stays in the flow either way (reserved height in CSS), so
+  // revealing or resetting never shifts the panels below it.
   if (!state.revealed || !stats) {
-    els.results.hidden = true;
-    els.results.innerHTML = "";
+    els.results.innerHTML = `<span class="hint">Results appear here after reveal</span>`;
     return;
   }
   const parts = [];
@@ -392,7 +423,6 @@ function renderResults(state) {
   }
   if (stats.consensus) parts.push(`<span class="consensus">🎉 Consensus!</span>`);
   els.results.innerHTML = parts.join("");
-  els.results.hidden = false;
 }
 
 /* ------------------------------ name wheel ------------------------------ */
@@ -470,9 +500,18 @@ function hidePickPanel() {
   els.pickPanel.classList.remove("show");
 }
 
+/** The winner's wheel-segment colour (same hue as their chip dot). */
+function winnerColor(winner) {
+  if (!lastState) return "";
+  const names = wheelNamesOf(lastState);
+  const index = names.indexOf(winner);
+  return index === -1 ? "" : wheelColor(index, names.length);
+}
+
 /** Slide the floating announcement in from the right. */
 function floatWinner(winner) {
   els.pickName.textContent = `🎯 ${winner}`;
+  els.pickName.style.color = winnerColor(winner);
   els.pickPanel.hidden = false;
   els.pickPanel.classList.remove("show");
   // Force a style flush so re-adding the class replays the slide-in.
@@ -537,7 +576,7 @@ function renderWheelChips(names) {
     chip.title = `Remove ${name} from the wheel`;
     chip.innerHTML =
       `<span class="chip-dot" style="background:${wheelColor(i, names.length)}"></span>` +
-      `${escapeHtml(name)} <span class="chip-x" aria-hidden="true">×</span>`;
+      `${escapeHtml(name)} <span class="chip-x" aria-hidden="true">✕</span>`;
     chip.addEventListener("click", () => {
       session?.transport.send({ type: "wheel-set", names: names.filter((n) => n !== name) });
     });
@@ -583,6 +622,7 @@ function render(state) {
 
   renderPlayers(state);
   renderResults(state);
+  renderObservers(state);
   renderWheel(state);
 
   const voters = state.participants.filter((p) => !p.observer);
@@ -634,14 +674,17 @@ function joinRoom(code) {
     return;
   }
   els.joinError.textContent = "";
+  const observer = els.observerCheck.checked;
+  // Remember the name and the observer role so a reload (auto-join below)
+  // rejoins the same way — a PO shouldn't silently turn into a voter.
   try {
     localStorage.setItem("meso-poker-name", name);
+    localStorage.setItem("meso-poker-observer", observer ? "1" : "");
   } catch {
     /* fine */
   }
 
   setConn("connecting");
-  const observer = els.observerCheck.checked;
   const transport = connectLive(code, name, observer, {
     state: render,
     up: () => setConn("live"),
@@ -685,6 +728,10 @@ function leaveRoom() {
   firstWheelState = true;
   els.wheelResult.hidden = true;
   hidePickPanel();
+  observerKey = "";
+  els.observerPanel.hidden = true;
+  els.observerPanel.classList.remove("show");
+  document.body.classList.remove("has-observers");
   setConn(null);
   history.replaceState(null, "", location.pathname);
   els.roomCode.focus();
@@ -786,6 +833,7 @@ addEventListener("pagehide", () => {
 // the name and a valid ?room= code are already known.
 try {
   els.playerName.value = localStorage.getItem("meso-poker-name") ?? "";
+  els.observerCheck.checked = localStorage.getItem("meso-poker-observer") === "1";
 } catch {
   /* ignore */
 }

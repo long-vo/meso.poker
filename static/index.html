@@ -12,13 +12,12 @@
   <header class="topbar">
     <nav class="brand" aria-label="Breadcrumb">
       <a class="brand-link" href="https://long-vo.github.io/meso.utilities/" title="All utilities">
-        <span class="brand-mark" aria-hidden="true">🧰</span>
+        <img class="brand-mark" src="./mesoneer-logo.jpg" alt="" aria-hidden="true" />
         <span class="brand-name">meso.utilities</span>
       </a>
       <span class="crumb-sep" aria-hidden="true">/</span>
       <span class="crumb-current"><span aria-hidden="true">🃏</span> Scrum Poker</span>
     </nav>
-    <img class="topbar-logo" src="./mesoneer-logo.jpg" alt="mesoneer" />
     <div class="topbar-actions">
       <span id="conn" class="pill" hidden></span>
       <button id="theme-toggle" class="icon-btn" type="button" aria-label="Toggle colour theme">
@@ -57,7 +56,7 @@
       </div>
 
       <div class="field">
-        <button id="create-btn" class="btn btn-ghost" type="button">➕ Create a new room</button>
+        <button id="create-btn" class="btn btn-ghost" type="button">Create a new room</button>
       </div>
 
       <p id="join-error" class="error-line" role="alert"></p>
@@ -89,7 +88,7 @@
           <span id="round-status" class="status"></span>
         </div>
         <div id="players" class="players"></div>
-        <div id="results" class="results" hidden></div>
+        <div id="results" class="results"></div>
       </div>
 
       <div class="panel deck-panel" aria-label="Your estimate">
@@ -133,7 +132,7 @@
             </div>
             <div id="wheel-chips" class="chips wheel-chips" aria-live="polite"></div>
             <div class="wheel-side-actions">
-              <button id="wheel-sync" class="btn btn-ghost btn-small" type="button">↺ Use room players</button>
+              <button id="wheel-sync" class="btn btn-ghost btn-small" type="button">Use room players</button>
             </div>
             <p id="wheel-result" class="wheel-result" aria-live="polite" hidden></p>
             <p class="hint">Spin to pick who presents, breaks the tie or fetches the coffee. The wheel
@@ -150,9 +149,14 @@
   </footer>
 
   <aside id="pick-panel" class="pick-panel" role="status" aria-live="polite" hidden>
-    <button id="pick-close" class="icon-btn pick-close" type="button" aria-label="Dismiss">×</button>
+    <button id="pick-close" class="icon-btn pick-close" type="button" aria-label="Dismiss">✕</button>
     <div class="pick-label">The wheel picked</div>
     <div id="pick-name" class="pick-name"></div>
+  </aside>
+
+  <aside id="observer-panel" class="observer-panel" role="status" aria-live="polite" hidden>
+    <div class="pick-label">Observing</div>
+    <div id="observer-names" class="observer-names"></div>
   </aside>
 
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
