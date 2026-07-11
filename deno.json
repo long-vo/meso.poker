@@ -1,0 +1,22 @@
+{
+  "name": "meso.poker",
+  "version": "0.1.0",
+  "exports": "./main.ts",
+  "tasks": {
+    "start": "deno run --allow-net --allow-read --allow-env main.ts",
+    "dev": "deno run --allow-net --allow-read --allow-env --watch main.ts",
+    "test": "deno test --allow-read",
+    "check": "deno check main.ts src/poker.test.ts",
+    "fmt": "deno fmt",
+    "lint": "deno lint"
+  },
+  "fmt": {
+    "lineWidth": 100,
+    "indentWidth": 2,
+    "semiColons": true,
+    "exclude": ["static/**/*.html"]
+  },
+  "lint": {
+    "rules": { "tags": ["recommended"] }
+  }
+}

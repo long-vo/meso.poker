@@ -1,0 +1,7 @@
+.git
+.github
+.githooks
+.DS_Store
+README.md
+Dockerfile
+render.yaml

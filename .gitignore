@@ -1,0 +1,9 @@
+# Deno
+.deno/
+deno.lock
+
+# Editors / OS
+.DS_Store
+.idea/
+.vscode/
+*.log

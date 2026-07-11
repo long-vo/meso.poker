@@ -1,0 +1,35 @@
+#!/bin/sh
+# Pre-commit hook: mirror CI before every commit.
+#
+# Runs the format check, type check, lint and tests. Formatting is verified
+# with --check (instead of rewriting files mid-commit); if it fails, run
+# `deno task fmt` yourself and re-stage.
+#
+# One-time setup per clone:  git config core.hooksPath .githooks
+# Bypass for a single commit: git commit --no-verify
+
+fail() {
+  echo ""
+  echo "✗ pre-commit failed: $1"
+  if [ "$1" = "format check" ]; then
+    echo "  run 'deno task fmt' and re-stage the formatted files"
+  fi
+  echo "  (bypass once with: git commit --no-verify)"
+  exit 1
+}
+
+command -v deno >/dev/null 2>&1 || fail "deno is not installed / not on PATH"
+
+echo "pre-commit: format check"
+deno task fmt --check || fail "format check"
+
+echo "pre-commit: type check"
+deno task check || fail "type check"
+
+echo "pre-commit: lint"
+deno task lint || fail "lint"
+
+echo "pre-commit: tests"
+deno task test || fail "tests"
+
+echo "✓ pre-commit checks passed"

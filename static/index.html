@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Scrum Poker — meso.poker</title>
+  <meta name="description" content="Planning poker for team estimation: pick a card, reveal together, agree on a number." />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ctext y='26' font-size='26'%3E%F0%9F%83%8F%3C/text%3E%3C/svg%3E" />
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <nav class="brand" aria-label="Breadcrumb">
+      <a class="brand-link" href="https://long-vo.github.io/meso.utilities/" title="All utilities">
+        <span class="brand-mark" aria-hidden="true">🧰</span>
+        <span class="brand-name">meso.utilities</span>
+      </a>
+      <span class="crumb-sep" aria-hidden="true">/</span>
+      <span class="crumb-current"><span aria-hidden="true">🃏</span> Scrum Poker</span>
+    </nav>
+    <div class="topbar-actions">
+      <span id="conn" class="pill" hidden></span>
+      <button id="theme-toggle" class="icon-btn" type="button" aria-label="Toggle colour theme">
+        <span class="theme-icon">🌙</span>
+      </button>
+    </div>
+  </header>
+
+  <main class="poker">
+    <section id="join" class="panel join-panel" aria-label="Join a room">
+      <h1>Scrum Poker</h1>
+      <p class="hint-lede">Estimate stories together — everyone picks a card, then reveal at once.</p>
+
+      <div class="field">
+        <label for="player-name">Your name</label>
+        <input id="player-name" type="text" maxlength="24" autocomplete="off" spellcheck="false"
+          placeholder="e.g. Long" />
+      </div>
+
+      <div class="field">
+        <label for="room-code">Room code</label>
+        <div class="join-row">
+          <input id="room-code" type="text" maxlength="8" autocomplete="off" spellcheck="false"
+            placeholder="e.g. QK7M" />
+          <button id="join-btn" class="btn btn-primary" type="button">Join</button>
+        </div>
+        <p class="hint">Got a code from a teammate? Enter it above — or start fresh:</p>
+      </div>
+
+      <div class="field">
+        <button id="create-btn" class="btn btn-ghost" type="button">➕ Create a new room</button>
+      </div>
+
+      <p id="join-error" class="error-line" role="alert"></p>
+    </section>
+
+    <section id="table" hidden>
+      <div class="panel table-bar">
+        <div class="room-info">
+          <span class="room-label">Room</span>
+          <code id="room-chip" class="room-code-chip">····</code>
+          <button id="invite" class="btn btn-small" type="button">🔗 Copy invite link</button>
+        </div>
+        <button id="leave" class="btn btn-small btn-ghost" type="button">Leave room</button>
+      </div>
+
+      <div class="panel story-panel">
+        <label for="story">Story being estimated</label>
+        <input id="story" type="text" maxlength="200" autocomplete="off" spellcheck="false"
+          placeholder="e.g. PROJ-42 — Checkout address validation" />
+        <p class="hint">Visible to everyone in the room; anyone can edit it.</p>
+      </div>
+
+      <div class="panel players-panel" aria-label="Players">
+        <div class="panel-head">
+          <h2>Players</h2>
+          <span id="round-status" class="status"></span>
+        </div>
+        <div id="players" class="players"></div>
+        <div id="results" class="results" hidden></div>
+      </div>
+
+      <div class="panel deck-panel" aria-label="Your estimate">
+        <div class="panel-head">
+          <h2>Your card</h2>
+          <div id="card-themes" class="theme-dots" role="radiogroup" aria-label="Card theme"
+            title="Pick a theme for your cards — everyone sees your card back in it"></div>
+          <div class="round-actions">
+            <button id="reveal" class="btn btn-small btn-primary" type="button">Reveal cards</button>
+            <button id="reset" class="btn btn-small" type="button">New round</button>
+          </div>
+        </div>
+        <div id="deck" class="deck" role="listbox" aria-label="Pick your estimate"></div>
+        <p class="hint">Click a card to vote, click it again to take it back. Votes lock when revealed.</p>
+      </div>
+
+      <div class="panel wheel-panel" aria-label="Random picker">
+        <div class="panel-head">
+          <h2>Random picker</h2>
+          <span id="wheel-status" class="status"></span>
+        </div>
+        <div class="wheel-wrap">
+          <div class="wheel-stage">
+            <div class="wheel-pointer" aria-hidden="true">▼</div>
+            <svg id="wheel" viewBox="0 0 200 200" role="img" aria-label="Wheel of names"></svg>
+            <button id="spin" class="btn spin-btn" type="button">Spin</button>
+          </div>
+          <div class="wheel-side">
+            <div class="field">
+              <label for="wheel-name">People on the wheel</label>
+              <div class="join-row wheel-add-row">
+                <input id="wheel-name" type="text" maxlength="24" autocomplete="off" spellcheck="false"
+                  placeholder="Add a name" />
+                <button id="wheel-add" class="btn" type="button">Add</button>
+              </div>
+            </div>
+            <div id="wheel-chips" class="chips wheel-chips" aria-live="polite"></div>
+            <div class="wheel-side-actions">
+              <button id="wheel-sync" class="btn btn-ghost btn-small" type="button">↺ Use room players</button>
+            </div>
+            <p id="wheel-result" class="wheel-result" aria-live="polite" hidden></p>
+            <p class="hint">Spin to pick who presents, breaks the tie or fetches the coffee. The wheel
+              follows the room until you edit it — everyone sees the same result.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    Live rooms sync through the meso.poker server · no accounts, rooms vanish when everyone leaves.
+  </footer>
+
+  <aside id="pick-panel" class="pick-panel" role="status" aria-live="polite" hidden>
+    <button id="pick-close" class="icon-btn pick-close" type="button" aria-label="Dismiss">×</button>
+    <div class="pick-label">The wheel picked</div>
+    <div id="pick-name" class="pick-name"></div>
+  </aside>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+  <script type="module" src="./theme.js"></script>
+  <script type="module" src="./poker.js"></script>
+</body>
+</html>
