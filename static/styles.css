@@ -500,8 +500,9 @@ a.card:hover .card-go {
   gap: 10px 16px;
   font-size: 13.5px;
 }
-.result-avg b {
-  font-size: 18px;
+.dist-chip {
+  font-size: 15px;
+  padding: 4px 12px;
   font-variant-numeric: tabular-nums;
 }
 .consensus {
@@ -555,6 +556,10 @@ a.card:hover .card-go {
   gap: 8px;
 }
 
+.observer-switch span {
+  font-weight: 600;
+}
+
 /* last-voter nudge: amber chip + glowing deck panel */
 .turn-chip {
   font-size: 11px;
@@ -565,6 +570,36 @@ a.card:hover .card-go {
   padding: 2px 9px;
   border-radius: 999px;
   white-space: nowrap;
+  /* pop in when it appears, then wiggle every few seconds for attention
+     (display:none -> visible restarts both, so the pop replays per round) */
+  animation:
+    chip-pop 0.35s cubic-bezier(0.34, 1.56, 0.64, 1),
+    chip-wiggle 3s ease-in-out 1.2s infinite;
+}
+@keyframes chip-pop {
+  from {
+    transform: scale(0.5);
+    opacity: 0;
+  }
+}
+@keyframes chip-wiggle {
+  0%,
+  24%,
+  100% {
+    transform: rotate(0deg);
+  }
+  4% {
+    transform: rotate(-5deg) scale(1.06);
+  }
+  10% {
+    transform: rotate(4deg) scale(1.06);
+  }
+  16% {
+    transform: rotate(-3deg) scale(1.03);
+  }
+  20% {
+    transform: rotate(2deg);
+  }
 }
 .deck-panel.awaiting-you {
   border-color: var(--warn);
@@ -577,7 +612,8 @@ a.card:hover .card-go {
   }
 }
 @media (prefers-reduced-motion: reduce) {
-  .deck-panel.awaiting-you {
+  .deck-panel.awaiting-you,
+  .turn-chip {
     animation: none;
   }
 }
@@ -585,6 +621,18 @@ a.card:hover .card-go {
 /* card theme picker */
 .deck-panel .panel-head {
   flex-wrap: wrap;
+}
+/* hint + theme dots share the row under the deck, so the header never
+   reflows when the waiting chip appears */
+.deck-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 7px;
+}
+.deck-foot .hint {
+  margin: 0;
 }
 .theme-dots {
   display: flex;
@@ -670,6 +718,15 @@ a.card:hover .card-go {
 .btn.spin-btn:active,
 .btn.spin-btn:disabled {
   transform: translate(-50%, -50%);
+}
+/* The generic .btn:disabled opacity would let the wheel disc show through
+   the round button (obvious with one player: a solid full-circle wheel).
+   Stay opaque; signal "disabled" with dimmed text instead. */
+.btn.spin-btn:disabled {
+  opacity: 1;
+  background: var(--bg-elev);
+  color: var(--text-faint);
+  border-color: var(--border-strong);
 }
 .wheel-hub {
   fill: var(--bg-elev);

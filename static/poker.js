@@ -32,6 +32,9 @@ const els = {
   joinBtn: $("join-btn"),
   createBtn: $("create-btn"),
   playerName: $("player-name"),
+  observerCheck: $("observer-check"),
+  observerNote: $("observer-note"),
+  deckFoot: $("deck-foot"),
   roomCode: $("room-code"),
   table: $("table"),
   roomChip: $("room-chip"),
@@ -122,7 +125,7 @@ const INITIAL_WINDOW_MS = 90_000; // Render free tier can take 30–60s to wake
 // and doesn't spin down mid-game (Render idles out after ~15 min without it;
 // WebSocket frames alone may not count). Runs only while a room is open.
 const KEEP_ALIVE_MS = 5 * 60_000;
-function connectLive(code, name, handlers) {
+function connectLive(code, name, observer, handlers) {
   let socket = null;
   let everOpened = false;
   let closedByUs = false;
@@ -136,7 +139,8 @@ function connectLive(code, name, handlers) {
     const proto = location.protocol === "https:" ? "wss" : "ws";
     socket = new WebSocket(
       `${proto}://${location.host}/api/poker/ws?room=${code}` +
-        `&name=${encodeURIComponent(name)}&theme=${encodeURIComponent(currentTheme())}`,
+        `&name=${encodeURIComponent(name)}&theme=${encodeURIComponent(currentTheme())}` +
+        (observer ? "&observer=1" : ""),
     );
     socket.onopen = () => {
       everOpened = true;
@@ -223,9 +227,16 @@ function connectLive(code, name, handlers) {
 }
 
 /** Solo transport: a local one-person room, same reducer as the server. */
-function createSolo(name, onState) {
+function createSolo(name, observer, onState) {
   const room = createRoom();
-  applyEvent(room, { type: "join", id: "you", name, theme: currentTheme(), at: Date.now() });
+  applyEvent(room, {
+    type: "join",
+    id: "you",
+    name,
+    theme: currentTheme(),
+    observer,
+    at: Date.now(),
+  });
   const push = () => onState(publicState(room, "you"));
   queueMicrotask(push);
   return {
@@ -322,7 +333,10 @@ function buildDeck() {
 
 function renderPlayers(state) {
   els.players.innerHTML = "";
+  // Observers (PO) watch from outside: they appear neither in the players
+  // grid nor on the wheel.
   for (const p of state.participants) {
+    if (p.observer) continue;
     const wrap = document.createElement("div");
     wrap.className = p.you ? "player me" : "player";
 
@@ -371,13 +385,10 @@ function renderResults(state) {
     return;
   }
   const parts = [];
-  parts.push(
-    stats.average === null
-      ? `<span class="result-avg">No numeric votes</span>`
-      : `<span class="result-avg">Average <b>${stats.average}</b></span>`,
-  );
   for (const { card, count } of stats.distribution) {
-    parts.push(`<span class="tag dist-chip">${escapeHtml(card)} × ${count}</span>`);
+    // "5 pts × 3" for point cards; "?" and "☕" carry no unit.
+    const unit = card === "?" || card === "☕" ? "" : card === "1" || card === "½" ? " pt" : " pts";
+    parts.push(`<span class="tag dist-chip">${escapeHtml(card)}${unit} × ${count}</span>`);
   }
   if (stats.consensus) parts.push(`<span class="consensus">🎉 Consensus!</span>`);
   els.results.innerHTML = parts.join("");
@@ -409,7 +420,7 @@ function wheelLabelColor(index, count) {
 function wheelNamesOf(state) {
   return state.wheel.custom
     ? state.wheel.names
-    : sanitizeWheelNames(state.participants.map((p) => p.name));
+    : sanitizeWheelNames(state.participants.filter((p) => !p.observer).map((p) => p.name));
 }
 
 function polar(angle, radius) {
@@ -574,8 +585,9 @@ function render(state) {
   renderResults(state);
   renderWheel(state);
 
-  const voted = state.participants.filter((p) => p.voted).length;
-  const total = state.participants.length;
+  const voters = state.participants.filter((p) => !p.observer);
+  const voted = voters.filter((p) => p.voted).length;
+  const total = voters.length;
   els.roundStatus.textContent = state.revealed ? "Revealed" : `${voted}/${total} voted`;
   els.roundStatus.className = state.revealed ? "status ok" : "status";
 
@@ -583,6 +595,11 @@ function render(state) {
   els.reset.disabled = !state.revealed && voted === 0;
 
   const mine = state.participants.find((p) => p.you);
+  // Observers have no deck: hide the cards and theme dots, show the note.
+  const observing = mine?.observer === true;
+  els.deck.hidden = observing;
+  els.deckFoot.hidden = observing;
+  els.observerNote.hidden = !observing;
   markSelectedTheme(mine?.theme ?? currentTheme());
   for (const btn of els.deck.children) {
     btn.classList.toggle("selected", mine?.vote === btn.textContent);
@@ -590,7 +607,8 @@ function render(state) {
   }
 
   // Nudge when everyone but you has voted and the round is still open.
-  const lastVoter = !state.revealed && total >= 2 && !mine?.voted && voted === total - 1;
+  const lastVoter = !state.revealed && !observing && total >= 2 &&
+    !mine?.voted && voted === total - 1;
   els.yourTurn.hidden = !lastVoter;
   document.querySelector(".deck-panel")?.classList.toggle("awaiting-you", lastVoter);
   if (state.revealed || voted === 0) nudgedThisRound = false;
@@ -623,7 +641,8 @@ function joinRoom(code) {
   }
 
   setConn("connecting");
-  const transport = connectLive(code, name, {
+  const observer = els.observerCheck.checked;
+  const transport = connectLive(code, name, observer, {
     state: render,
     up: () => setConn("live"),
     down: () => {
@@ -639,7 +658,7 @@ function joinRoom(code) {
     fail: () => {
       // No server (static build or server down): same table, local room.
       if (!session) return;
-      session.transport = createSolo(name, render);
+      session.transport = createSolo(name, observer, render);
       setConn("solo");
       showToast("No server reachable — solo mode");
     },
@@ -736,7 +755,9 @@ els.wheelName.addEventListener("keydown", (e) => {
 
 els.wheelSync.addEventListener("click", () => {
   if (!session || !lastState) return;
-  const names = sanitizeWheelNames(lastState.participants.map((p) => p.name));
+  const names = sanitizeWheelNames(
+    lastState.participants.filter((p) => !p.observer).map((p) => p.name),
+  );
   session.transport.send({ type: "wheel-set", names });
   showToast("Wheel now matches the room");
 });

@@ -282,6 +282,8 @@ export function handlePokerSocket(req: Request): Response {
   const name = (url.searchParams.get("name") ?? "").trim();
   // Optional card theme; the reducer falls back to the default for junk.
   const theme = url.searchParams.get("theme") ?? "";
+  // Observer (product owner): watches and reveals, never votes.
+  const observer = url.searchParams.get("observer") === "1";
 
   if (!CODE_PATTERN.test(code)) {
     return json({ error: "Invalid room code (4–8 letters/digits)." }, 400);
@@ -302,7 +304,7 @@ export function handlePokerSocket(req: Request): Response {
   socket.onopen = () => {
     const isNewHere = !rooms.has(code);
     const room = getRoom(code);
-    if (!applyEvent(room.state, { type: "join", id, name, theme, at: Date.now() })) {
+    if (!applyEvent(room.state, { type: "join", id, name, theme, observer, at: Date.now() })) {
       send(socket, { type: "error", message: "Room is full." });
       socket.close(1008, "room full");
       if (room.clients.size === 0) scheduleCleanup(code, room);

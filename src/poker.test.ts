@@ -96,14 +96,14 @@ Deno.test("cardValue maps the deck to numbers where possible", () => {
   assertEquals(DECK.length, 13);
 });
 
-Deno.test("stats: average over numeric cards, distribution in deck order", () => {
+Deno.test("stats: sum over numeric cards, distribution in deck order", () => {
   const room = roomWith("Ana", "Ben", "Cid", "Dee");
   applyEvent(room, { type: "vote", id: "p1", value: "3" });
   applyEvent(room, { type: "vote", id: "p2", value: "5" });
   applyEvent(room, { type: "vote", id: "p3", value: "☕" });
   const stats = computeStats(room);
   assertEquals(stats.votes, 3);
-  assertEquals(stats.average, 4);
+  assertEquals(stats.sum, 8);
   assertEquals(stats.distribution, [
     { card: "3", count: 1 },
     { card: "5", count: 1 },
@@ -112,7 +112,7 @@ Deno.test("stats: average over numeric cards, distribution in deck order", () =>
   assertEquals(stats.consensus, false);
 });
 
-Deno.test("stats: consensus requires 2+ identical votes; ?-only rounds have no average", () => {
+Deno.test("stats: consensus requires 2+ identical votes; ?-only rounds have no sum", () => {
   const room = roomWith("Ana", "Ben");
   applyEvent(room, { type: "vote", id: "p1", value: "8" });
   applyEvent(room, { type: "vote", id: "p2", value: "8" });
@@ -120,7 +120,7 @@ Deno.test("stats: consensus requires 2+ identical votes; ?-only rounds have no a
   const solo = roomWith("Ana");
   applyEvent(solo, { type: "vote", id: "p1", value: "?" });
   assertEquals(computeStats(solo).consensus, false, "one vote is not consensus");
-  assertEquals(computeStats(solo).average, null);
+  assertEquals(computeStats(solo).sum, null);
 });
 
 Deno.test("publicState hides other votes until reveal, always echoes your own", () => {
@@ -133,6 +133,7 @@ Deno.test("publicState hides other votes until reveal, always echoes your own", 
     voted: true,
     vote: null,
     theme: "ocean",
+    observer: false,
   });
   const forAna = publicState(room, "p1");
   assertEquals(forAna.participants[0], {
@@ -141,10 +142,20 @@ Deno.test("publicState hides other votes until reveal, always echoes your own", 
     voted: true,
     vote: "5",
     theme: "ocean",
+    observer: false,
   });
   assertEquals(forAna.stats, null, "no stats before reveal");
   applyEvent(room, { type: "reveal", at: 9 });
   assertEquals(publicState(room, "p2").participants[0].vote, "5", "visible after reveal");
+});
+
+Deno.test("observers join flagged, cannot vote, and are exposed in publicState", () => {
+  const room = createRoom();
+  applyEvent(room, { type: "join", id: "po", name: "Pat", observer: true, at: 1 });
+  applyEvent(room, { type: "join", id: "p1", name: "Ana", at: 2 });
+  assertEquals(room.participants["po"].observer, true);
+  assertEquals(applyEvent(room, { type: "vote", id: "po", value: "5" }), false, "observer vote");
+  assertEquals(publicState(room, "p1").participants[0].observer, true);
 });
 
 Deno.test("card theme: defaults on join, validates ids, changes via the theme event", () => {

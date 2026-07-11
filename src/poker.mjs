@@ -25,7 +25,7 @@ export const CARD_THEMES = ["ocean", "violet", "forest", "sunset", "ruby"];
 export const LIMITS = { name: 24, story: 200, participants: 50, wheelNames: 30 };
 
 /**
- * @typedef {{ name: string, vote: string | null, joinedAt: number, theme: string }} Participant
+ * @typedef {{ name: string, vote: string | null, joinedAt: number, theme: string, observer: boolean }} Participant
  * @typedef {{
  *   participants: Record<string, Participant>,
  *   revealed: boolean,
@@ -46,6 +46,7 @@ export const LIMITS = { name: 24, story: 200, participants: 50, wheelNames: 30 }
  *   names?: string[],
  *   winner?: string,
  *   theme?: string,
+ *   observer?: boolean,
  *   at?: number,
  * }} RoomEvent
  */
@@ -116,7 +117,14 @@ export function applyEvent(room, event) {
       const theme = CARD_THEMES.includes(String(event.theme))
         ? String(event.theme)
         : CARD_THEMES[0];
-      room.participants[id] = { name, vote: null, joinedAt: event.at ?? Date.now(), theme };
+      room.participants[id] = {
+        name,
+        vote: null,
+        joinedAt: event.at ?? Date.now(),
+        theme,
+        // Observers (e.g. the product owner) watch and reveal but never vote.
+        observer: event.observer === true,
+      };
       return true;
     }
     case "theme": {
@@ -134,7 +142,7 @@ export function applyEvent(room, event) {
     }
     case "vote": {
       const participant = room.participants[String(event.id ?? "")];
-      if (!participant || room.revealed) return false;
+      if (!participant || participant.observer || room.revealed) return false;
       const value = event.value === null || event.value === undefined ? null : String(event.value);
       if (value !== null && !DECK.includes(value)) return false;
       if (participant.vote === value) return false;
@@ -181,12 +189,12 @@ export function applyEvent(room, event) {
 
 /**
  * Round statistics, meaningful once a round is revealed.
- * The average uses numeric cards only ("?" and "☕" are excluded); consensus
+ * The sum uses numeric cards only ("?" and "☕" are excluded); consensus
  * requires at least two identical votes and no differing ones.
  * @param {Room} room
  * @returns {{
  *   votes: number,
- *   average: number | null,
+ *   sum: number | null,
  *   distribution: { card: string, count: number }[],
  *   consensus: boolean,
  * }}
@@ -202,11 +210,9 @@ export function computeStats(room) {
   for (const vote of votes) counts.set(vote, (counts.get(vote) ?? 0) + 1);
   const distribution = DECK.filter((card) => counts.has(card))
     .map((card) => ({ card, count: counts.get(card) ?? 0 }));
-  const average = numeric.length
-    ? Math.round((numeric.reduce((a, b) => a + b, 0) / numeric.length) * 10) / 10
-    : null;
+  const sum = numeric.length ? Math.round(numeric.reduce((a, b) => a + b, 0) * 10) / 10 : null;
   const consensus = votes.length >= 2 && votes.every((v) => v === votes[0]);
-  return { votes: votes.length, average, distribution, consensus };
+  return { votes: votes.length, sum, distribution, consensus };
 }
 
 /**
@@ -227,6 +233,7 @@ export function computeStats(room) {
  *     voted: boolean,
  *     vote: string | null,
  *     theme: string,
+ *     observer: boolean,
  *   }[],
  *   stats: ReturnType<typeof computeStats> | null,
  *   wheel: { names: string[], custom: boolean, winner: string | null, spunAt: number },
@@ -241,6 +248,7 @@ export function publicState(room, selfId) {
       voted: p.vote !== null,
       vote: room.revealed || id === selfId ? p.vote : null,
       theme: p.theme,
+      observer: p.observer === true,
     }));
   return {
     revealed: room.revealed,

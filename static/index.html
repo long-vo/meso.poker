@@ -49,6 +49,14 @@
       </div>
 
       <div class="field">
+        <label class="switch observer-switch">
+          <input id="observer-check" type="checkbox" /> <span>👁 Join as observer (PO)</span>
+        </label>
+        <p class="hint">Watch the round without voting — you can still reveal cards and start new
+          rounds. For product owners and stakeholders.</p>
+      </div>
+
+      <div class="field">
         <button id="create-btn" class="btn btn-ghost" type="button">➕ Create a new room</button>
       </div>
 
@@ -88,15 +96,19 @@
         <div class="panel-head">
           <h2>Your card</h2>
           <span id="your-turn" class="turn-chip" hidden>⏳ Everyone's waiting for you</span>
-          <div id="card-themes" class="theme-dots" role="radiogroup" aria-label="Card theme"
-            title="Pick a theme for your cards — everyone sees your card back in it"></div>
           <div class="round-actions">
             <button id="reveal" class="btn btn-small btn-primary" type="button">Reveal cards</button>
             <button id="reset" class="btn btn-small" type="button">New round</button>
           </div>
         </div>
         <div id="deck" class="deck" role="listbox" aria-label="Pick your estimate"></div>
-        <p class="hint">Click a card to vote, click it again to take it back. Votes lock when revealed.</p>
+        <p id="observer-note" class="hint" hidden>👁 You're observing — you can reveal cards and
+          start new rounds, but you don't vote.</p>
+        <div id="deck-foot" class="deck-foot">
+          <p class="hint">Click a card to vote, click it again to take it back. Votes lock when revealed.</p>
+          <div id="card-themes" class="theme-dots" role="radiogroup" aria-label="Card theme"
+            title="Pick a theme for your cards — everyone sees your card back in it"></div>
+        </div>
       </div>
 
       <div class="panel wheel-panel" aria-label="Random picker">

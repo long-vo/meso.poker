@@ -11,11 +11,11 @@ and links here from its hub.
 Open the page, enter your name and either create a room or join with a teammate's 4–8 character code
 (invite links look like `/?room=QK7M`). Everyone picks a card from the classic deck (0 ½ 1 2 3 5 8
 13 20 40 100 ? ☕); votes stay hidden until someone hits **Reveal**, which locks the round and shows
-the average, the vote distribution and a consensus banner. **New round** clears the cards. Anyone
-can edit the shared story line, reveal or reset — no host role, no accounts. Empty rooms evaporate
-after a few minutes. Every player can pick a **card theme** (ocean, violet, forest, sunset, ruby)
-via the dots next to "Your card" — your deck and the card back other players see take that colour,
-and the choice is remembered for the next session.
+the total, the vote distribution and a consensus banner. **New round** clears the cards. Anyone can
+edit the shared story line, reveal or reset — no host role, no accounts. Empty rooms evaporate after
+a few minutes. Every player can pick a **card theme** (ocean, violet, forest, sunset, ruby) via the
+dots next to "Your card" — your deck and the card back other players see take that colour, and the
+choice is remembered for the next session.
 
 At the bottom sits a **random-name wheel** for picking who presents, breaks a tie or fetches the
 coffee. It mirrors the people in the room until someone edits it — add guests or remove names via
