@@ -11,7 +11,7 @@
  * Wire protocol (JSON):
  *   client -> server: { type: "vote", value }   value: deck card or null
  *                     { type: "reveal" } | { type: "reset" }
- *                     { type: "story", text } | { type: "ping" }
+ *                     { type: "story", text } | { type: "ping" } | { type: "leave" }
  *                     { type: "wheel-set", names } | { type: "wheel-spin", winner }
  *                     { type: "theme", theme }    theme: a CARD_THEMES id
  *   server -> client: { type: "state", room, state }  (see publicState)
@@ -27,6 +27,8 @@ interface LocalRoom {
   state: Room;
   /** Open sockets on this isolate, by participant id. */
   clients: Map<string, WebSocket>;
+  /** Last time each local client sent anything (messages count as pings). */
+  seen: Map<string, number>;
   /** Latest snapshot from each sibling isolate. */
   remotes: Map<string, { state: Room; seenAt: number }>;
   /** Typed via setTimeout so it works whether Deno resolves web or Node timer types. */
@@ -48,6 +50,10 @@ const MAX_ROOMS = 500;
 const MAX_MESSAGE_BYTES = 4096;
 const REMOTE_TTL_MS = 75_000;
 const HEARTBEAT_MS = 30_000;
+// Clients ping every 25s; a socket silent for 60s+ has missed two pings and
+// is presumed dead (closed tab, sleep, dropped network) — close it so the
+// player leaves the room promptly instead of lingering until TCP notices.
+const CLIENT_TIMEOUT_MS = 60_000;
 const EMPTY_ROOM_TTL_MS = 5 * 60_000;
 
 const isolateId = crypto.randomUUID();
@@ -76,7 +82,7 @@ function send(socket: WebSocket, payload: unknown): void {
 function getRoom(code: string): LocalRoom {
   let room = rooms.get(code);
   if (!room) {
-    room = { state: createRoom(), clients: new Map(), remotes: new Map() };
+    room = { state: createRoom(), clients: new Map(), seen: new Map(), remotes: new Map() };
     rooms.set(code, room);
   }
   clearTimeout(room.emptyTimer);
@@ -143,8 +149,19 @@ if (channel) {
 // never send a "leave" for their participants).
 setInterval(() => {
   const cutoff = Date.now() - REMOTE_TTL_MS;
+  const deadline = Date.now() - CLIENT_TIMEOUT_MS;
   for (const [code, room] of rooms) {
     if (room.clients.size === 0) continue;
+    // Reap silent sockets; close() triggers onclose, which emits the leave.
+    for (const [id, socket] of room.clients) {
+      if ((room.seen.get(id) ?? 0) < deadline) {
+        try {
+          socket.close(1001, "timed out");
+        } catch {
+          /* already closing */
+        }
+      }
+    }
     broadcast(code, room);
     let pruned = false;
     for (const [id, remote] of room.remotes) {
@@ -159,6 +176,7 @@ setInterval(() => {
 
 function handleClientMessage(code: string, room: LocalRoom, id: string, raw: string): void {
   if (raw.length > MAX_MESSAGE_BYTES) return;
+  room.seen.set(id, Date.now());
   let message: {
     type?: string;
     value?: unknown;
@@ -177,6 +195,26 @@ function handleClientMessage(code: string, room: LocalRoom, id: string, raw: str
   switch (message.type) {
     case "ping": {
       if (socket) send(socket, { type: "pong" });
+      return;
+    }
+    case "leave": {
+      // Explicit goodbye: proxies (e.g. Render's) can sit on the WebSocket
+      // close handshake for ~10s, but data frames relay instantly — so the
+      // client announces the leave, we act on it, then close the socket.
+      if (socket) {
+        try {
+          socket.close(1000, "left");
+        } catch {
+          /* already closing */
+        }
+      }
+      room.clients.delete(id);
+      room.seen.delete(id);
+      if (applyEvent(room.state, { type: "leave", id })) {
+        broadcast(code, room);
+        pushState(code, room);
+      }
+      if (room.clients.size === 0) scheduleCleanup(code, room);
       return;
     }
     case "vote": {
@@ -271,6 +309,7 @@ export function handlePokerSocket(req: Request): Response {
       return;
     }
     room.clients.set(id, socket);
+    room.seen.set(id, Date.now());
     // `hello` asks sibling isolates to answer with their snapshots so a
     // freshly-opened room catches up on participants, story and reveal state.
     broadcast(code, room, isNewHere ? { hello: true } : undefined);
@@ -286,6 +325,7 @@ export function handlePokerSocket(req: Request): Response {
     const room = rooms.get(code);
     if (!room) return;
     room.clients.delete(id);
+    room.seen.delete(id);
     if (applyEvent(room.state, { type: "leave", id })) {
       broadcast(code, room);
       pushState(code, room);

@@ -210,6 +210,9 @@ function connectLive(code, name, handlers) {
       clearTimeout(retryTimer);
       clearInterval(pingTimer);
       clearInterval(keepAliveTimer);
+      // Announce the leave as a data frame first: proxies relay it instantly,
+      // while the close handshake itself can take ~10s to reach the server.
+      send({ type: "leave" });
       try {
         socket?.close();
       } catch {
@@ -749,6 +752,13 @@ els.spin.addEventListener("click", () => {
   }
   const winner = names[Math.floor(Math.random() * names.length)];
   session.transport.send({ type: "wheel-spin", winner });
+});
+
+// Tell the server we're gone on refresh/tab close: a deliberate close beats
+// waiting for the proxy to notice a dead TCP connection. `pagehide` fires
+// reliably on mobile too, where `beforeunload` often doesn't.
+addEventListener("pagehide", () => {
+  session?.transport.close();
 });
 
 // Prefill from the last session and the invite link; auto-join when both
