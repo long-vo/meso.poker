@@ -18,6 +18,7 @@
       <span class="crumb-sep" aria-hidden="true">/</span>
       <span class="crumb-current"><span aria-hidden="true">🃏</span> Scrum Poker</span>
     </nav>
+    <img class="topbar-logo" src="./mesoneer-logo.jpg" alt="mesoneer" />
     <div class="topbar-actions">
       <span id="conn" class="pill" hidden></span>
       <button id="theme-toggle" class="icon-btn" type="button" aria-label="Toggle colour theme">
@@ -55,22 +56,25 @@
     </section>
 
     <section id="table" hidden>
-      <div class="panel table-bar">
-        <div class="room-info">
-          <span class="room-label">Room</span>
-          <code id="room-chip" class="room-code-chip">····</code>
-          <button id="invite" class="btn btn-small" type="button">🔗 Copy invite link</button>
+      <div class="table-side">
+        <div class="panel table-bar">
+          <div class="room-info">
+            <span class="room-label">Room</span>
+            <code id="room-chip" class="room-code-chip">····</code>
+            <button id="invite" class="btn btn-small" type="button">🔗 Copy invite link</button>
+          </div>
+          <button id="leave" class="btn btn-small btn-ghost" type="button">Leave room</button>
         </div>
-        <button id="leave" class="btn btn-small btn-ghost" type="button">Leave room</button>
+
+        <div class="panel story-panel">
+          <label for="story">Story being estimated</label>
+          <input id="story" type="text" maxlength="200" autocomplete="off" spellcheck="false"
+            placeholder="e.g. PROJ-42 — Checkout address validation" />
+          <p class="hint">Visible to everyone in the room; anyone can edit it.</p>
+        </div>
       </div>
 
-      <div class="panel story-panel">
-        <label for="story">Story being estimated</label>
-        <input id="story" type="text" maxlength="200" autocomplete="off" spellcheck="false"
-          placeholder="e.g. PROJ-42 — Checkout address validation" />
-        <p class="hint">Visible to everyone in the room; anyone can edit it.</p>
-      </div>
-
+      <div class="table-main">
       <div class="panel players-panel" aria-label="Players">
         <div class="panel-head">
           <h2>Players</h2>
@@ -83,6 +87,7 @@
       <div class="panel deck-panel" aria-label="Your estimate">
         <div class="panel-head">
           <h2>Your card</h2>
+          <span id="your-turn" class="turn-chip" hidden>⏳ Everyone's waiting for you</span>
           <div id="card-themes" class="theme-dots" role="radiogroup" aria-label="Card theme"
             title="Pick a theme for your cards — everyone sees your card back in it"></div>
           <div class="round-actions">
@@ -123,6 +128,7 @@
               follows the room until you edit it — everyone sees the same result.</p>
           </div>
         </div>
+      </div>
       </div>
     </section>
   </main>

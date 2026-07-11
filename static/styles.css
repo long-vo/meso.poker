@@ -15,6 +15,7 @@
   --warn: #d29922;
   --danger: #f85149;
   --mask: #f0a35e;
+  --player: #45c4b0;
   --j-key: #79c0ff;
   --j-str: #a5d6ff;
   --j-num: #d2a8ff;
@@ -43,6 +44,7 @@
   --warn: #9a6700;
   --danger: #cf222e;
   --mask: #b8620f;
+  --player: #0f8a7a;
   --j-key: #0550ae;
   --j-str: #0a7d55;
   --j-num: #6639ba;
@@ -139,6 +141,22 @@ body {
   font-size: 13.5px;
   font-weight: 600;
   white-space: nowrap;
+}
+
+/* centered brand logo in the topbar (square tile with its own background) */
+.topbar-logo {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  height: 38px;
+  width: 38px;
+  border-radius: 9px;
+  display: block;
+}
+@media (max-width: 640px) {
+  .topbar-logo {
+    display: none;
+  }
 }
 
 .topbar-actions {
@@ -286,14 +304,25 @@ a.card:hover .card-go {
 
 /* ---- scrum poker ---- */
 .poker {
-  max-width: 980px;
+  max-width: 1360px;
   margin: 0 auto;
   padding: 26px clamp(16px, 4vw, 40px) 8px;
 }
+/* Two columns: room controls (table-bar + story) on the left, the play
+   area (players, deck, wheel) on the right. Each side stacks its panels
+   independently so heights never couple. Collapses below 960px. */
 .poker > section[id="table"] {
+  display: grid;
+  grid-template-columns: minmax(240px, 300px) minmax(0, 1fr);
+  gap: 18px;
+  align-items: start;
+}
+.table-side,
+.table-main {
   display: flex;
   flex-direction: column;
   gap: 18px;
+  min-width: 0;
 }
 
 .join-panel {
@@ -392,7 +421,7 @@ a.card:hover .card-go {
 .player-name {
   font-size: 14.5px;
   font-weight: 700;
-  color: var(--accent);
+  color: var(--player);
   max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -402,6 +431,22 @@ a.card:hover .card-go {
   color: var(--text-dim);
   font-weight: 600;
   font-size: 12px;
+}
+/* Your own entry stands out from the other players. */
+.player.me .player-name {
+  color: var(--accent-2);
+}
+.player.me .player-name .you {
+  display: inline-block;
+  background: var(--accent-2);
+  color: #fff;
+  font-weight: 700;
+  font-size: 10.5px;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  padding: 1px 7px;
+  border-radius: 999px;
+  vertical-align: 1px;
 }
 
 .pcard {
@@ -424,15 +469,13 @@ a.card:hover .card-go {
 }
 /* --card-accent is set per card from its owner's chosen theme */
 .pcard.back {
-  border-color: color-mix(in srgb, var(--card-accent, var(--accent)) 65%, var(--border-strong));
-  background: repeating-linear-gradient(
-    45deg,
-    color-mix(in srgb, var(--card-accent, var(--accent)) 26%, var(--bg-inset)),
-    color-mix(in srgb, var(--card-accent, var(--accent)) 26%, var(--bg-inset)) 5px,
-    var(--bg-inset) 5px,
-    var(--bg-inset) 10px
-  );
-  color: color-mix(in srgb, var(--card-accent, var(--accent)) 80%, var(--text));
+  border-color: var(--card-accent, var(--accent));
+  background: color-mix(in srgb, var(--card-accent, var(--accent)) 32%, var(--bg-inset));
+  /* inner frame, like a real card back: a gap ring then a thin accent line */
+  box-shadow:
+    inset 0 0 0 4px color-mix(in srgb, var(--card-accent, var(--accent)) 32%, var(--bg-inset)),
+    inset 0 0 0 5.5px color-mix(in srgb, var(--card-accent, var(--accent)) 45%, transparent);
+  color: color-mix(in srgb, var(--card-accent, var(--accent)) 25%, var(--text));
   font-size: 15px;
 }
 .pcard.face {
@@ -467,12 +510,18 @@ a.card:hover .card-go {
 }
 
 .deck {
-  display: flex;
-  flex-wrap: wrap;
+  /* one row, always: auto-flow column puts every card in the same row and
+     minmax(0, 52px) lets them shrink evenly instead of wrapping */
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(0, 52px);
   gap: 10px;
+  justify-content: start;
 }
 .deck-card {
-  width: 52px;
+  width: 100%;
+  min-width: 0;
+  padding: 0;
   height: 76px;
   border-radius: 9px;
   border: 1.5px solid var(--border-strong);
@@ -504,6 +553,33 @@ a.card:hover .card-go {
 .round-actions {
   display: flex;
   gap: 8px;
+}
+
+/* last-voter nudge: amber chip + glowing deck panel */
+.turn-chip {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--warn);
+  border: 1px solid color-mix(in srgb, var(--warn) 40%, var(--border));
+  background: color-mix(in srgb, var(--warn) 10%, transparent);
+  padding: 2px 9px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+.deck-panel.awaiting-you {
+  border-color: var(--warn);
+  box-shadow: 0 0 14px color-mix(in srgb, var(--warn) 25%, transparent);
+  animation: awaiting-pulse 2s ease-in-out infinite;
+}
+@keyframes awaiting-pulse {
+  50% {
+    box-shadow: 0 0 22px color-mix(in srgb, var(--warn) 40%, transparent);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .deck-panel.awaiting-you {
+    animation: none;
+  }
 }
 
 /* card theme picker */
@@ -1148,7 +1224,19 @@ textarea:focus {
     max-width: none;
   }
 }
+@media (max-width: 960px) {
+  .poker > section[id="table"] {
+    grid-template-columns: 1fr;
+  }
+}
 @media (max-width: 720px) {
+  .deck {
+    display: flex;
+    flex-wrap: wrap;
+  }
+  .deck-card {
+    width: 52px;
+  }
   .brand-sub {
     display: none;
   }

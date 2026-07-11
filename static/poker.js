@@ -39,6 +39,7 @@ const els = {
   leave: $("leave"),
   story: $("story"),
   roundStatus: $("round-status"),
+  yourTurn: $("your-turn"),
   players: $("players"),
   results: $("results"),
   reveal: $("reveal"),
@@ -320,7 +321,7 @@ function renderPlayers(state) {
   els.players.innerHTML = "";
   for (const p of state.participants) {
     const wrap = document.createElement("div");
-    wrap.className = "player";
+    wrap.className = p.you ? "player me" : "player";
 
     const card = document.createElement("div");
     card.className = "pcard";
@@ -349,7 +350,7 @@ function renderPlayers(state) {
     const label = document.createElement("div");
     label.className = "player-name";
     label.innerHTML = p.you
-      ? `${escapeHtml(p.name)} <span class="you">(you)</span>`
+      ? `${escapeHtml(p.name)} <span class="you">you</span>`
       : escapeHtml(p.name);
     label.title = p.name;
 
@@ -555,6 +556,9 @@ function renderWheel(state) {
   firstWheelState = false;
 }
 
+/* One toast per round when you become the last voter; reset on reveal/reset. */
+let nudgedThisRound = false;
+
 function render(state) {
   lastState = state;
 
@@ -580,6 +584,16 @@ function render(state) {
   for (const btn of els.deck.children) {
     btn.classList.toggle("selected", mine?.vote === btn.textContent);
     btn.disabled = state.revealed;
+  }
+
+  // Nudge when everyone but you has voted and the round is still open.
+  const lastVoter = !state.revealed && total >= 2 && !mine?.voted && voted === total - 1;
+  els.yourTurn.hidden = !lastVoter;
+  document.querySelector(".deck-panel")?.classList.toggle("awaiting-you", lastVoter);
+  if (state.revealed || voted === 0) nudgedThisRound = false;
+  if (lastVoter && !nudgedThisRound) {
+    nudgedThisRound = true;
+    showToast("🃏 Everyone's in — pick your card");
   }
 }
 
