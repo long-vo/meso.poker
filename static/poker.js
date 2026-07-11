@@ -55,6 +55,8 @@ const els = {
   wheelAdd: $("wheel-add"),
   wheelChips: $("wheel-chips"),
   wheelSync: $("wheel-sync"),
+  wheelShuffle: $("wheel-shuffle"),
+  wheelAutoShuffle: $("wheel-autoshuffle"),
   wheelStatus: $("wheel-status"),
   wheelResult: $("wheel-result"),
   pickPanel: $("pick-panel"),
@@ -76,6 +78,10 @@ let wheelSpinning = false;
 let lastSpunAt = 0;
 let wheelNamesKey = "";
 let firstWheelState = true;
+/* Auto-shuffle is a local preference: only the client that spins reshuffles
+   the order once its spin lands, so the room never gets competing reorders. */
+let autoShuffle = false;
+let shuffleAfterSpin = false;
 
 /* ------------------------------- helpers -------------------------------- */
 
@@ -453,6 +459,22 @@ function wheelNamesOf(state) {
     : sanitizeWheelNames(state.participants.filter((p) => !p.observer).map((p) => p.name));
 }
 
+/**
+ * Fisher-Yates shuffle, guaranteed to change the order (the reducer ignores a
+ * reorder that lands on the same list, so a no-op shuffle would do nothing).
+ */
+function shuffled(names) {
+  const out = [...names];
+  for (let i = out.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [out[i], out[j]] = [out[j], out[i]];
+  }
+  if (out.length > 1 && out.every((n, i) => n === names[i])) {
+    [out[0], out[1]] = [out[1], out[0]];
+  }
+  return out;
+}
+
 function polar(angle, radius) {
   const rad = (angle * Math.PI) / 180;
   return [100 + radius * Math.sin(rad), 100 - radius * Math.cos(rad)];
@@ -563,6 +585,11 @@ function animateWheelTo(winner, names) {
     wheelSpinning = false;
     group.classList.remove("spinning");
     showWinner(winner, true);
+    // Auto-shuffle: reorder for the next spin once this one has landed.
+    if (shuffleAfterSpin) {
+      shuffleAfterSpin = false;
+      session?.transport.send({ type: "wheel-set", names: shuffled(names) });
+    }
     if (lastState) render(lastState);
   }, 4300);
 }
@@ -596,6 +623,7 @@ function renderWheel(state) {
   if (!wheelSpinning) {
     els.wheelStatus.textContent = names.length ? `${names.length} on the wheel` : "wheel is empty";
     els.spin.disabled = names.length < 2;
+    els.wheelShuffle.disabled = names.length < 2;
   }
 
   if (state.wheel.spunAt > lastSpunAt) {
@@ -726,6 +754,7 @@ function leaveRoom() {
   lastSpunAt = 0;
   wheelNamesKey = "";
   firstWheelState = true;
+  shuffleAfterSpin = false;
   els.wheelResult.hidden = true;
   hidePickPanel();
   observerKey = "";
@@ -809,6 +838,30 @@ els.wheelSync.addEventListener("click", () => {
   showToast("Wheel now matches the room");
 });
 
+els.wheelShuffle.addEventListener("click", () => {
+  if (!session || !lastState || wheelSpinning) return;
+  const names = wheelNamesOf(lastState);
+  if (names.length < 2) return;
+  session.transport.send({ type: "wheel-set", names: shuffled(names) });
+  showToast("Shuffled the order");
+});
+
+function setAutoShuffle(on) {
+  autoShuffle = on;
+  try {
+    localStorage.setItem("meso-poker-autoshuffle", on ? "1" : "");
+  } catch {
+    /* fine */
+  }
+  els.wheelAutoShuffle.setAttribute("aria-pressed", on ? "true" : "false");
+}
+els.wheelAutoShuffle.addEventListener("click", () => setAutoShuffle(!autoShuffle));
+try {
+  setAutoShuffle(localStorage.getItem("meso-poker-autoshuffle") === "1");
+} catch {
+  /* ignore */
+}
+
 els.spin.addEventListener("click", () => {
   if (!session || !lastState || wheelSpinning) return;
   const names = wheelNamesOf(lastState);
@@ -819,6 +872,7 @@ els.spin.addEventListener("click", () => {
     session.transport.send({ type: "wheel-set", names });
   }
   const winner = names[Math.floor(Math.random() * names.length)];
+  shuffleAfterSpin = autoShuffle;
   session.transport.send({ type: "wheel-spin", winner });
 });
 

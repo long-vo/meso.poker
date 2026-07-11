@@ -795,6 +795,14 @@ button.wheel-chip:hover .chip-x {
 }
 .wheel-side-actions {
   margin-top: 12px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.wheel-toggle[aria-pressed="true"] {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  color: var(--accent);
 }
 .wheel-result {
   margin: 14px 0 0;
