@@ -13,6 +13,7 @@
   --accent-2: #7c5cff;
   --good: #3fb950;
   --warn: #d29922;
+  --on-warn: #1a1204;
   --danger: #f85149;
   --mask: #f0a35e;
   --player: #45c4b0;
@@ -43,6 +44,7 @@
   --accent-2: #6b4dff;
   --good: #1a7f37;
   --warn: #9a6700;
+  --on-warn: #fff;
   --danger: #cf222e;
   --mask: #b8620f;
   --player: #0f8a7a;
@@ -416,9 +418,16 @@ a.card:hover .card-go {
   min-width: 0;
 }
 .player-name {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  max-width: 100%;
   font-size: 14.5px;
   font-weight: 700;
   color: var(--player);
+}
+.player-name .pname {
   max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -511,9 +520,32 @@ a.card:hover .card-go {
   white-space: nowrap;
 }
 .dist-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
   font-size: 15px;
   padding: 4px 12px;
   font-variant-numeric: tabular-nums;
+}
+.dist-chip__count {
+  padding: 2px 7px;
+  border-radius: 999px;
+  font-size: 12.5px;
+  line-height: 1;
+  color: inherit;
+  background: color-mix(in srgb, currentColor 15%, transparent);
+}
+/* The most-chosen card(s) after reveal: a solid gold "winner" fill. Ties share
+   it. `--on-warn` flips the text (dark on gold in dark theme, white on the
+   deeper gold in light); the count pill re-tints from `currentColor` to match. */
+.dist-chip--top {
+  border-color: var(--warn);
+  background: var(--warn);
+  color: var(--on-warn);
+  font-weight: 500;
+}
+.dist-chip--top .dist-chip__count {
+  background: color-mix(in srgb, currentColor 22%, transparent);
 }
 .consensus {
   color: var(--good);

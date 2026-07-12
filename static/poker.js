@@ -374,9 +374,9 @@ function renderPlayers(state) {
 
     const label = document.createElement("div");
     label.className = "player-name";
-    label.innerHTML = p.you
-      ? `${escapeHtml(p.name)} <span class="you">you</span>`
-      : escapeHtml(p.name);
+    const who = `<span class="pname">${escapeHtml(p.name)}</span>`;
+    // The "you" badge sits on its own line so a long name can't crowd it out.
+    label.innerHTML = p.you ? `${who}<span class="you">you</span>` : who;
     label.title = p.name;
 
     wrap.appendChild(card);
@@ -422,10 +422,17 @@ function renderResults(state) {
     return;
   }
   const parts = [];
+  // Highlight the most-chosen card(s); on a tie every leader lights up.
+  const maxCount = stats.distribution.reduce((m, d) => Math.max(m, d.count), 0);
   for (const { card, count } of stats.distribution) {
-    // "5 pts × 3" for point cards; "?" and "☕" carry no unit.
+    // "5 pts" for point cards; "?" and "☕" carry no unit. The tally rides in a
+    // pill beside it.
     const unit = card === "?" || card === "☕" ? "" : card === "1" || card === "½" ? " pt" : " pts";
-    parts.push(`<span class="tag dist-chip">${escapeHtml(card)}${unit} × ${count}</span>`);
+    const top = count === maxCount && maxCount > 0 ? " dist-chip--top" : "";
+    parts.push(
+      `<span class="tag dist-chip${top}"><span>${escapeHtml(card)}${unit}</span>` +
+        `<span class="dist-chip__count">${count}</span></span>`,
+    );
   }
   if (stats.consensus) parts.push(`<span class="consensus">🎉 Consensus!</span>`);
   els.results.innerHTML = parts.join("");
@@ -439,8 +446,11 @@ function renderResults(state) {
  * Spin hub — a neutral themed circle — never blends into a segment.
  * The label is a pale tint of the same hue: distinct per name, yet always
  * readable on its mid-lightness segment.
+ * A lone player is the exception: index 0 would be hue 0 — a whole disc of hot
+ * red — so a single name gets a calm on-brand blue instead.
  */
 function wheelHue(index, count) {
+  if (count === 1) return 210;
   return Math.round((index * 360) / Math.max(count, 1));
 }
 
