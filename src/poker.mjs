@@ -25,6 +25,14 @@ export const CARD_THEMES = ["ocean", "violet", "forest", "sunset", "ruby"];
 export const LIMITS = { name: 24, story: 200, participants: 50, wheelNames: 30 };
 
 /**
+ * Emoji a player can send as a fleeting reaction. Reactions are relay-only:
+ * they are never written to room state — the server validates against this
+ * list and fans the message out to every open socket (see poker-server.ts),
+ * so late joiners simply never see past reactions.
+ */
+export const REACTIONS = ["👍", "🎉", "🤯", "☕"];
+
+/**
  * @typedef {{ name: string, vote: string | null, joinedAt: number, theme: string, observer: boolean }} Participant
  * @typedef {{
  *   participants: Record<string, Participant>,
