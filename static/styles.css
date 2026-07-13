@@ -1412,3 +1412,147 @@ textarea:focus {
     -webkit-text-fill-color: transparent;
   }
 }
+
+/* ---- reactions & nudges (poker) ----
+   Reactions float up over the players panel and evaporate; a nudge wiggles
+   the sleeping voter's card on every screen. Both are ephemeral relays —
+   see poker-server.ts — so everything here is fire-and-forget animation. */
+.players-panel {
+  position: relative;
+  /* balloons rise inside the panel and clip at its edge */
+  overflow: hidden;
+}
+.players-panel .panel-head {
+  flex-wrap: wrap;
+}
+.reactions {
+  display: flex;
+  gap: 6px;
+}
+.reaction-btn {
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border-radius: 999px;
+  border: 1px solid var(--border-strong);
+  background: var(--bg-inset);
+  font-size: 17px;
+  line-height: 1;
+  cursor: pointer;
+  transition: transform 0.15s, border-color 0.15s, background 0.15s;
+}
+.reaction-btn:hover {
+  transform: translateY(-2px) scale(1.08);
+  border-color: var(--accent);
+}
+.reaction-btn:active {
+  transform: scale(0.94);
+}
+
+.reaction-layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none; /* clicks pass through to the cards underneath */
+  z-index: 3;
+}
+.reaction-float {
+  position: absolute;
+  bottom: 6px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  animation: reaction-rise 2.2s ease-out forwards;
+  will-change: transform, opacity;
+}
+.reaction-float .reaction-emoji {
+  font-size: 28px;
+  line-height: 1;
+}
+.reaction-float .reaction-name {
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--text-dim);
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 1px 7px;
+  max-width: 110px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+@keyframes reaction-rise {
+  0% {
+    transform: translateY(0) scale(0.6);
+    opacity: 0;
+  }
+  12% {
+    transform: translateY(-14px) scale(1.15);
+    opacity: 1;
+  }
+  24% {
+    transform: translateY(-32px) scale(1);
+  }
+  100% {
+    transform: translateY(-190px) scale(1);
+    opacity: 0;
+  }
+}
+@keyframes reaction-fade {
+  0% {
+    opacity: 0;
+  }
+  15%,
+  80% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+/* a teammate who hasn't voted yet: their card invites a poke */
+.pcard.nudgable {
+  cursor: pointer;
+  transition: background 0.2s, border-color 0.2s, color 0.2s, transform 0.15s;
+}
+.pcard.nudgable:hover,
+.pcard.nudgable:focus-visible {
+  border-color: var(--warn);
+  transform: translateY(-2px);
+}
+.pcard.nudged {
+  border-color: var(--warn);
+  animation: pcard-nudge 0.9s ease-in-out;
+}
+@keyframes pcard-nudge {
+  0%,
+  100% {
+    transform: translateX(0) rotate(0);
+  }
+  15% {
+    transform: translateX(-5px) rotate(-4deg);
+  }
+  30% {
+    transform: translateX(5px) rotate(4deg);
+  }
+  45% {
+    transform: translateX(-4px) rotate(-3deg);
+  }
+  60% {
+    transform: translateX(4px) rotate(2deg);
+  }
+  75% {
+    transform: translateX(-2px) rotate(-1deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .reaction-float {
+    /* still appears and disappears — it just doesn't fly */
+    animation-name: reaction-fade;
+  }
+  .pcard.nudged {
+    animation: none;
+  }
+}

@@ -14,10 +14,26 @@
  *                     { type: "story", text } | { type: "ping" } | { type: "leave" }
  *                     { type: "wheel-set", names } | { type: "wheel-spin", winner }
  *                     { type: "theme", theme }    theme: a CARD_THEMES id
+ *                     { type: "react", emoji }    emoji: a REACTIONS entry
+ *                     { type: "nudge", name }     name: a non-voter to poke
  *   server -> client: { type: "state", room, state }  (see publicState)
  *                     { type: "pong" } | { type: "error", message }
+ *                     { type: "react", emoji, name }   name: who reacted
+ *                     { type: "nudge", name, from }    from: who poked
+ *
+ * `react` and `nudge` are ephemeral signals: validated, rate-limited and
+ * relayed to every open socket (local + sibling isolates), but never written
+ * to the room — reconnects and late joiners see nothing, by design.
  */
-import { applyEvent, CODE_PATTERN, createRoom, LIMITS, mergeRooms, publicState } from "./poker.mjs";
+import {
+  applyEvent,
+  CODE_PATTERN,
+  createRoom,
+  LIMITS,
+  mergeRooms,
+  publicState,
+  REACTIONS,
+} from "./poker.mjs";
 
 type Room = ReturnType<typeof createRoom>;
 type RoomEvent = Parameters<typeof applyEvent>[1];
@@ -29,6 +45,8 @@ interface LocalRoom {
   clients: Map<string, WebSocket>;
   /** Last time each local client sent anything (messages count as pings). */
   seen: Map<string, number>;
+  /** Recent relay-message timestamps per local client (rate limiting). */
+  relayAt: Map<string, number[]>;
   /** Latest snapshot from each sibling isolate. */
   remotes: Map<string, { state: Room; seenAt: number }>;
   /** Typed via setTimeout so it works whether Deno resolves web or Node timer types. */
@@ -46,8 +64,24 @@ interface GossipMessage {
   hello?: boolean;
 }
 
+/** Ephemeral, never stored: fanned out to sockets and forgotten. */
+type RelayPayload =
+  | { type: "react"; emoji: string; name: string }
+  | { type: "nudge"; name: string; from: string };
+
+/** A relay riding the gossip channel to reach sockets on sibling isolates. */
+interface RelayMessage {
+  from: string;
+  room: string;
+  relay: RelayPayload;
+}
+
 const MAX_ROOMS = 500;
 const MAX_MESSAGE_BYTES = 4096;
+// Reactions/nudges per client within the sliding window; beyond it they're
+// silently dropped so one keyboard-mash can't flood every screen in the room.
+const RELAY_WINDOW_MS = 2_000;
+const RELAY_MAX_PER_WINDOW = 6;
 const REMOTE_TTL_MS = 75_000;
 const HEARTBEAT_MS = 30_000;
 // Clients ping every 25s; a socket silent for 60s+ has missed two pings and
@@ -82,11 +116,36 @@ function send(socket: WebSocket, payload: unknown): void {
 function getRoom(code: string): LocalRoom {
   let room = rooms.get(code);
   if (!room) {
-    room = { state: createRoom(), clients: new Map(), seen: new Map(), remotes: new Map() };
+    room = {
+      state: createRoom(),
+      clients: new Map(),
+      seen: new Map(),
+      relayAt: new Map(),
+      remotes: new Map(),
+    };
     rooms.set(code, room);
   }
   clearTimeout(room.emptyTimer);
   return room;
+}
+
+/** Sliding-window rate limit shared by all relay messages from one client. */
+function allowRelay(room: LocalRoom, id: string): boolean {
+  const now = Date.now();
+  const recent = (room.relayAt.get(id) ?? []).filter((t) => now - t < RELAY_WINDOW_MS);
+  if (recent.length >= RELAY_MAX_PER_WINDOW) return false;
+  recent.push(now);
+  room.relayAt.set(id, recent);
+  return true;
+}
+
+/** Fan an ephemeral payload out: local sockets now, sibling isolates via the channel. */
+function relay(code: string, room: LocalRoom, payload: RelayPayload): void {
+  for (const socket of room.clients.values()) send(socket, payload);
+  if (channel) {
+    const message: RelayMessage = { from: isolateId, room: code, relay: payload };
+    channel.postMessage(message);
+  }
 }
 
 function broadcast(code: string, room: LocalRoom, extra?: Partial<GossipMessage>): void {
@@ -113,13 +172,19 @@ function scheduleCleanup(code: string, room: LocalRoom): void {
 }
 
 if (channel) {
-  channel.onmessage = (e: MessageEvent<GossipMessage>) => {
+  channel.onmessage = (e: MessageEvent<GossipMessage | RelayMessage>) => {
     const msg = e.data;
     if (!msg || msg.from === isolateId) return;
     // Only rooms with local sockets need syncing; a future local join sends
     // `hello` and the siblings answer with their snapshots.
     const room = rooms.get(msg.room);
     if (!room) return;
+    // Ephemeral relays (reactions, nudges): pass straight to local sockets —
+    // they carry no snapshot and must not touch room state.
+    if ("relay" in msg) {
+      for (const socket of room.clients.values()) send(socket, msg.relay);
+      return;
+    }
     room.remotes.set(msg.from, { state: msg.state, seenAt: Date.now() });
     if (msg.event) applyEvent(room.state, msg.event);
     // Catch-up: adopt newer shared flags from the snapshot (no-op when the
@@ -184,6 +249,8 @@ function handleClientMessage(code: string, room: LocalRoom, id: string, raw: str
     names?: unknown;
     winner?: unknown;
     theme?: unknown;
+    emoji?: unknown;
+    name?: unknown;
   };
   try {
     message = JSON.parse(raw);
@@ -210,6 +277,7 @@ function handleClientMessage(code: string, room: LocalRoom, id: string, raw: str
       }
       room.clients.delete(id);
       room.seen.delete(id);
+      room.relayAt.delete(id);
       if (applyEvent(room.state, { type: "leave", id })) {
         broadcast(code, room);
         pushState(code, room);
@@ -265,6 +333,29 @@ function handleClientMessage(code: string, room: LocalRoom, id: string, raw: str
         broadcast(code, room);
         pushState(code, room);
       }
+      return;
+    }
+    // Ephemeral signals: validated and relayed, never written to the room —
+    // the reducer, publicState and the tests stay untouched by design.
+    case "react": {
+      const emoji = String(message.emoji ?? "");
+      const name = room.state.participants[id]?.name;
+      if (!name || !REACTIONS.includes(emoji) || !allowRelay(room, id)) return;
+      relay(code, room, { type: "react", emoji, name });
+      return;
+    }
+    case "nudge": {
+      const target = String(message.name ?? "").trim().slice(0, LIMITS.name);
+      const from = room.state.participants[id]?.name;
+      if (!target || !from || target === from || !allowRelay(room, id)) return;
+      // Validate against the merged room: the target may be a participant
+      // whose socket lives on a sibling isolate. Only sleeping voters — in
+      // the room, not observing, no vote yet, round still open — get poked.
+      const merged = mergeRooms(room.state, [...room.remotes.values()].map((r) => r.state));
+      const sleeping = Object.values(merged.participants)
+        .some((p) => p.name === target && !p.observer && p.vote === null);
+      if (!sleeping || merged.revealed) return;
+      relay(code, room, { type: "nudge", name: target, from });
       return;
     }
     default:
@@ -328,6 +419,7 @@ export function handlePokerSocket(req: Request): Response {
     if (!room) return;
     room.clients.delete(id);
     room.seen.delete(id);
+    room.relayAt.delete(id);
     if (applyEvent(room.state, { type: "leave", id })) {
       broadcast(code, room);
       pushState(code, room);

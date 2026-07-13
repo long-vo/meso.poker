@@ -11,6 +11,7 @@ import {
   generateRoomCode,
   LIMITS,
   publicState,
+  REACTIONS,
   sanitizeWheelNames,
 } from "./poker.mjs";
 
@@ -65,6 +66,8 @@ const els = {
   observerPanel: $("observer-panel"),
   observerNames: $("observer-names"),
   cardThemes: $("card-themes"),
+  reactions: $("reactions"),
+  reactionLayer: $("reaction-layer"),
 };
 
 /** Current session: null until joined. */
@@ -170,6 +173,8 @@ function connectLive(code, name, observer, handlers) {
       }
       if (msg.type === "state") handlers.state(msg.state);
       else if (msg.type === "error") handlers.error(msg.message);
+      else if (msg.type === "react") handlers.react(msg);
+      else if (msg.type === "nudge") handlers.nudge(msg);
     };
     socket.onclose = () => {
       clearInterval(pingTimer);
@@ -251,6 +256,13 @@ function createSolo(name, observer, onState) {
     kind: "solo",
     send: (message) => {
       if (message.type === "ping") return;
+      // Ephemeral signals: no server to relay them, so react echoes locally
+      // and nudge is a no-op (there is nobody else to poke in solo mode).
+      if (message.type === "react") {
+        floatReaction(String(message.emoji ?? ""), name);
+        return;
+      }
+      if (message.type === "nudge") return;
       const event = message.type === "vote"
         ? { type: "vote", id: "you", value: message.value }
         : message.type === "story"
@@ -320,6 +332,98 @@ function buildThemePicker() {
   }
 }
 
+/* -------------------------- reactions & nudges --------------------------- */
+/* Both are ephemeral signals: the server relays them to every open socket
+   but never writes them to the room, so nothing here touches room state. */
+
+const REACTION_FLOAT_MS = 2600; // outlives the longest rise animation
+const REACT_THROTTLE_MS = 350;
+const NUDGE_COOLDOWN_MS = 5_000;
+let lastReactAt = 0;
+/** name -> when we last nudged them (client-side politeness on top of the
+    server's rate limit; the map is tiny and cleared on leave). */
+const nudgedAt = new Map();
+
+function buildReactions() {
+  els.reactions.innerHTML = "";
+  for (const emoji of REACTIONS) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "reaction-btn";
+    btn.textContent = emoji;
+    btn.title = `React with ${emoji}`;
+    btn.setAttribute("aria-label", `React with ${emoji}`);
+    btn.addEventListener("click", () => sendReaction(emoji));
+    els.reactions.appendChild(btn);
+  }
+}
+
+function sendReaction(emoji) {
+  if (!session) return;
+  const now = Date.now();
+  if (now - lastReactAt < REACT_THROTTLE_MS) return;
+  lastReactAt = now;
+  session.transport.send({ type: "react", emoji });
+}
+
+/** Float an emoji up over the players panel; the sender's name tags along. */
+function floatReaction(emoji, name) {
+  if (!REACTIONS.includes(emoji)) return;
+  // A stampede can't flood the DOM: the oldest balloon pops early.
+  if (els.reactionLayer.childElementCount >= 30) {
+    els.reactionLayer.firstElementChild?.remove();
+  }
+  const float = document.createElement("span");
+  float.className = "reaction-float";
+  float.style.left = `${8 + Math.random() * 76}%`;
+  float.style.animationDuration = `${(2 + Math.random() * 0.4).toFixed(2)}s`;
+  const glyph = document.createElement("span");
+  glyph.className = "reaction-emoji";
+  glyph.textContent = emoji;
+  const who = document.createElement("span");
+  who.className = "reaction-name";
+  who.textContent = name;
+  float.append(glyph, who);
+  els.reactionLayer.appendChild(float);
+  // Removal is timer-based, not animationend: reduced-motion swaps the
+  // animation for a plain fade and the node must still go away.
+  setTimeout(() => float.remove(), REACTION_FLOAT_MS);
+}
+
+function sendNudge(name) {
+  if (!session || !lastState || lastState.revealed) return;
+  const now = Date.now();
+  if (now - (nudgedAt.get(name) ?? 0) < NUDGE_COOLDOWN_MS) {
+    showToast(`Easy — ${name} was just nudged`);
+    return;
+  }
+  nudgedAt.set(name, now);
+  session.transport.send({ type: "nudge", name });
+}
+
+/** Replay the wiggle on every card owned by `name` (names can collide). */
+function wigglePlayer(name) {
+  for (const card of els.players.querySelectorAll(".pcard[data-name]")) {
+    if (card.dataset.name !== name) continue;
+    card.classList.remove("nudged");
+    // Force a style flush so re-adding the class replays the animation.
+    void card.getBoundingClientRect();
+    card.classList.add("nudged");
+  }
+}
+
+function onNudge(target, from) {
+  if (!target) return;
+  wigglePlayer(target);
+  const mine = lastState?.participants.find((p) => p.you);
+  if (mine?.name === target) {
+    showToast(`👉 ${from} nudged you — pick a card!`);
+    navigator.vibrate?.(200);
+  } else if (mine?.name === from) {
+    showToast(`You nudged ${target}`);
+  }
+}
+
 /* ------------------------------- rendering ------------------------------- */
 
 function buildDeck() {
@@ -350,7 +454,22 @@ function renderPlayers(state) {
 
     const card = document.createElement("div");
     card.className = "pcard";
+    card.dataset.name = p.name;
     card.style.setProperty("--card-accent", themeColor(p.theme));
+    // A teammate who hasn't voted yet can be poked awake — click their card.
+    if (!state.revealed && !p.you && !p.voted) {
+      card.classList.add("nudgable");
+      card.setAttribute("role", "button");
+      card.setAttribute("tabindex", "0");
+      card.title = `Nudge ${p.name}`;
+      card.setAttribute("aria-label", `Nudge ${p.name}`);
+      card.addEventListener("click", () => sendNudge(p.name));
+      card.addEventListener("keydown", (e) => {
+        if (e.key !== "Enter" && e.key !== " ") return;
+        e.preventDefault();
+        sendNudge(p.name);
+      });
+    }
     if (state.revealed) {
       card.classList.add("face");
       if (p.vote === null) {
@@ -418,7 +537,8 @@ function renderResults(state) {
   // The strip stays in the flow either way (reserved height in CSS), so
   // revealing or resetting never shifts the panels below it.
   if (!state.revealed || !stats) {
-    els.results.innerHTML = `<span class="hint">Results appear here after reveal</span>`;
+    els.results.innerHTML =
+      `<span class="hint">Results appear here after reveal. Most voted numbers will be highlighted.</span>`;
     return;
   }
   const parts = [];
@@ -725,6 +845,8 @@ function joinRoom(code) {
   setConn("connecting");
   const transport = connectLive(code, name, observer, {
     state: render,
+    react: (msg) => floatReaction(String(msg.emoji ?? ""), String(msg.name ?? "")),
+    nudge: (msg) => onNudge(String(msg.name ?? ""), String(msg.from ?? "")),
     up: () => setConn("live"),
     down: () => {
       setConn("reconnecting");
@@ -771,6 +893,8 @@ function leaveRoom() {
   els.observerPanel.hidden = true;
   els.observerPanel.classList.remove("show");
   document.body.classList.remove("has-observers");
+  els.reactionLayer.innerHTML = "";
+  nudgedAt.clear();
   setConn(null);
   history.replaceState(null, "", location.pathname);
   els.roomCode.focus();
@@ -780,6 +904,7 @@ function leaveRoom() {
 
 buildDeck();
 buildThemePicker();
+buildReactions();
 
 els.joinBtn.addEventListener("click", () => joinRoom(els.roomCode.value));
 els.createBtn.addEventListener("click", () => joinRoom(generateRoomCode()));
