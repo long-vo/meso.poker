@@ -294,6 +294,44 @@ Deno.test("notes-set replaces the list; identical sets are no-ops; reset leaves 
   assertEquals(room.notes, []);
 });
 
+Deno.test("only the author can remove their note; author-less notes are anyone's", () => {
+  const room = roomWith("Ana", "Ben"); // p1 = Ana, p2 = Ben
+  const anas = { date: "2026-07-14", text: "mine", who: "Ana", at: 1 };
+  const bens = { date: "2026-07-15", text: "his", who: "Ben", at: 2 };
+  applyEvent(room, { type: "notes-set", notes: [anas, bens], at: 3, id: "p1" });
+  assertEquals(
+    applyEvent(room, { type: "notes-set", notes: [anas], at: 4, id: "p1" }),
+    false,
+    "Ana cannot drop Ben's note",
+  );
+  assertEquals(
+    applyEvent(room, { type: "notes-set", notes: [bens], at: 5, id: "p1" }),
+    true,
+    "Ana drops her own note",
+  );
+  assertEquals(
+    applyEvent(room, { type: "notes-set", notes: [], at: 6, id: "ghost" }),
+    false,
+    "unknown editors cannot edit at all",
+  );
+  assertEquals(
+    applyEvent(room, { type: "notes-set", notes: [], at: 7, id: "p2" }),
+    true,
+    "Ben clears his own note",
+  );
+  applyEvent(room, {
+    type: "notes-set",
+    notes: [{ date: "2026-07-16", text: "anon" }],
+    id: "p1",
+    at: 8,
+  });
+  assertEquals(
+    applyEvent(room, { type: "notes-set", notes: [], at: 9, id: "p2" }),
+    true,
+    "author-less notes are removable by anyone",
+  );
+});
+
 Deno.test("publicState exposes notes with the edit timestamp", () => {
   const room = roomWith("Ana");
   assertEquals(publicState(room, "p1").notes, { list: [], at: 0 });

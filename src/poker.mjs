@@ -233,9 +233,23 @@ export function applyEvent(room, event) {
     }
     // Notes are replaced as a whole list (like the wheel): clients send the
     // full edited list and last-writer-wins keeps the isolates agreeing.
+    // Only the author may remove their own note: when the event carries the
+    // sender's id (the server always stamps it; solo mode passes "you"), an
+    // edit must keep every note authored by someone else. Author-less notes
+    // are removable by anyone. Events without an id — internal use, tests —
+    // skip the ownership check, since untrusted clients can never omit it.
     case "notes-set": {
       const notes = sanitizeNotes(event.notes);
       if (JSON.stringify(notes) === JSON.stringify(room.notes)) return false;
+      if (event.id !== undefined) {
+        const editor = room.participants[String(event.id)];
+        if (!editor) return false;
+        const kept = new Set(notes.map((note) => JSON.stringify(note)));
+        const removedForeign = room.notes.some((note) =>
+          note.who !== "" && note.who !== editor.name && !kept.has(JSON.stringify(note))
+        );
+        if (removedForeign) return false;
+      }
       room.notes = notes;
       room.notesAt = event.at ?? Date.now();
       return true;

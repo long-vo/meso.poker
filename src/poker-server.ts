@@ -335,9 +335,11 @@ function handleClientMessage(code: string, room: LocalRoom, id: string, raw: str
       return;
     }
     // Notes travel like the wheel list: a shared flag adopted from snapshots.
+    // The sender's id rides along so the reducer can enforce that only the
+    // author removes their own notes.
     case "notes-set": {
       const notes = Array.isArray(message.notes) ? message.notes : [];
-      if (applyEvent(room.state, { type: "notes-set", notes, at: Date.now() })) {
+      if (applyEvent(room.state, { type: "notes-set", notes, id, at: Date.now() })) {
         broadcast(code, room);
         pushState(code, room);
       }

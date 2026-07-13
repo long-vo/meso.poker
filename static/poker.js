@@ -278,7 +278,7 @@ function createSolo(name, observer, onState) {
         : message.type === "wheel-spin"
         ? { type: "wheel-spin", winner: message.winner, at: Date.now() }
         : message.type === "notes-set"
-        ? { type: "notes-set", notes: message.notes, at: Date.now() }
+        ? { type: "notes-set", notes: message.notes, id: "you", at: Date.now() }
         : message.type === "theme"
         ? { type: "theme", id: "you", theme: message.theme }
         : { type: message.type, at: Date.now() };
@@ -497,6 +497,9 @@ function renderNotes(state) {
     return;
   }
   const today = todayStr();
+  // Only your own notes get a remove button (the reducer enforces the same
+  // rule server-side); author-less notes are fair game for anyone.
+  const myName = state.participants.find((p) => p.you)?.name ?? "";
   list.forEach((note, index) => {
     const row = document.createElement("div");
     row.className = "note" + (note.date === today ? " today" : note.date < today ? " past" : "");
@@ -513,19 +516,22 @@ function renderNotes(state) {
       who.textContent = `— ${note.who}`;
       body.appendChild(who);
     }
-    const remove = document.createElement("button");
-    remove.type = "button";
-    remove.className = "note-x";
-    remove.textContent = "✕";
-    remove.title = "Remove note";
-    remove.setAttribute("aria-label", `Remove note: ${note.text}`);
-    remove.addEventListener("click", () => {
-      session?.transport.send({
-        type: "notes-set",
-        notes: list.filter((_, i) => i !== index),
+    row.append(date, body);
+    if (!note.who || note.who === myName) {
+      const remove = document.createElement("button");
+      remove.type = "button";
+      remove.className = "note-x";
+      remove.textContent = "✕";
+      remove.title = "Remove note";
+      remove.setAttribute("aria-label", `Remove note: ${note.text}`);
+      remove.addEventListener("click", () => {
+        session?.transport.send({
+          type: "notes-set",
+          notes: list.filter((_, i) => i !== index),
+        });
       });
-    });
-    row.append(date, body, remove);
+      row.appendChild(remove);
+    }
     els.notesList.appendChild(row);
   });
 }
