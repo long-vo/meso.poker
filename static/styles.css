@@ -1668,6 +1668,25 @@ textarea:focus {
 [data-theme="light"] .notes-add-row input[type="date"] {
   color-scheme: light;
 }
+/* Accent-tinted calendar glyph. Chromium draws the indicator icon as a
+   background-image, so it can be replaced; data URIs cannot read CSS
+   variables, hence the accent hex is repeated per theme (Firefox/Safari
+   keep their native icon — `color-scheme` above keeps those legible). */
+.notes-add-row input[type="date"]::-webkit-calendar-picker-indicator {
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+  opacity: 0.85;
+  background: transparent
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%234f9dff' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='3' y='5' width='18' height='16' rx='2'/%3E%3Cpath d='M16 3v4M8 3v4M3 11h18'/%3E%3C/svg%3E")
+    center / contain no-repeat;
+}
+.notes-add-row input[type="date"]::-webkit-calendar-picker-indicator:hover {
+  opacity: 1;
+}
+[data-theme="light"] .notes-add-row input[type="date"]::-webkit-calendar-picker-indicator {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%232f6fed' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='3' y='5' width='18' height='16' rx='2'/%3E%3Cpath d='M16 3v4M8 3v4M3 11h18'/%3E%3C/svg%3E");
+}
 .notes-add-row .btn {
   margin-left: auto;
 }
