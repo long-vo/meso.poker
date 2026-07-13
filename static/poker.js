@@ -12,6 +12,7 @@ import {
   LIMITS,
   publicState,
   REACTIONS,
+  sanitizeNotes,
   sanitizeWheelNames,
 } from "./poker.mjs";
 
@@ -68,6 +69,11 @@ const els = {
   cardThemes: $("card-themes"),
   reactions: $("reactions"),
   reactionLayer: $("reaction-layer"),
+  notesList: $("notes-list"),
+  notesStatus: $("notes-status"),
+  noteDate: $("note-date"),
+  noteText: $("note-text"),
+  noteAdd: $("note-add"),
 };
 
 /** Current session: null until joined. */
@@ -271,6 +277,8 @@ function createSolo(name, observer, onState) {
         ? { type: "wheel-set", names: message.names, at: Date.now() }
         : message.type === "wheel-spin"
         ? { type: "wheel-spin", winner: message.winner, at: Date.now() }
+        : message.type === "notes-set"
+        ? { type: "notes-set", notes: message.notes, at: Date.now() }
         : message.type === "theme"
         ? { type: "theme", id: "you", theme: message.theme }
         : { type: message.type, at: Date.now() };
@@ -422,6 +430,130 @@ function onNudge(target, from) {
   } else if (mine?.name === from) {
     showToast(`You nudged ${target}`);
   }
+}
+
+/* -------------------------------- room notes ------------------------------ */
+/* Notes are shared room state (notes-set events, LWW across isolates) and
+   additionally saved per room code in localStorage: when a room has expired
+   server-side, the first returning client re-seeds it. That local copy is
+   what makes notes effectively permanent without any server storage. */
+
+const notesKey = (code) => `meso-poker-notes-${code}`;
+let notesSeedChecked = false;
+let lastNotesAt = -1;
+
+/** Local YYYY-MM-DD (toISOString would shift the date across midnight UTC). */
+function todayStr() {
+  const now = new Date();
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+}
+
+function formatNoteDate(date) {
+  if (date === todayStr()) return "Today";
+  return new Date(`${date}T12:00:00`).toLocaleDateString(undefined, {
+    weekday: "short",
+    day: "numeric",
+    month: "short",
+  });
+}
+
+function renderNotes(state) {
+  const { list, at } = state.notes;
+
+  // Persist the freshest copy for this room; `at` > 0 means the list was
+  // deliberately edited at least once, so even a clear-out is remembered.
+  if (session && at > 0 && at !== lastNotesAt) {
+    lastNotesAt = at;
+    try {
+      localStorage.setItem(notesKey(session.code), JSON.stringify({ at, list }));
+    } catch {
+      /* storage blocked or full — notes still live in the room */
+    }
+  }
+
+  // Re-seed a virgin room (never edited, nothing in it) once per connection
+  // from the copy this browser saved last time the room was open.
+  if (session && !notesSeedChecked) {
+    notesSeedChecked = true;
+    if (at === 0 && list.length === 0) {
+      try {
+        const saved = JSON.parse(localStorage.getItem(notesKey(session.code)) ?? "null");
+        const seed = sanitizeNotes(saved?.list);
+        if (seed.length) session.transport.send({ type: "notes-set", notes: seed });
+      } catch {
+        /* corrupt copy — start clean */
+      }
+    }
+  }
+
+  els.notesStatus.textContent = list.length
+    ? `${list.length} ${list.length === 1 ? "note" : "notes"}`
+    : "";
+  els.notesList.innerHTML = "";
+  if (list.length === 0) {
+    els.notesList.innerHTML =
+      `<span class="hint">No notes yet — decisions, reminders, dates to remember.</span>`;
+    return;
+  }
+  const today = todayStr();
+  list.forEach((note, index) => {
+    const row = document.createElement("div");
+    row.className = "note" + (note.date === today ? " today" : note.date < today ? " past" : "");
+    const date = document.createElement("span");
+    date.className = "note-date";
+    date.textContent = formatNoteDate(note.date);
+    date.title = note.date;
+    const body = document.createElement("div");
+    body.className = "note-body";
+    body.textContent = note.text;
+    if (note.who) {
+      const who = document.createElement("div");
+      who.className = "note-who";
+      who.textContent = `— ${note.who}`;
+      body.appendChild(who);
+    }
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.className = "note-x";
+    remove.textContent = "✕";
+    remove.title = "Remove note";
+    remove.setAttribute("aria-label", `Remove note: ${note.text}`);
+    remove.addEventListener("click", () => {
+      session?.transport.send({
+        type: "notes-set",
+        notes: list.filter((_, i) => i !== index),
+      });
+    });
+    row.append(date, body, remove);
+    els.notesList.appendChild(row);
+  });
+}
+
+function addNote() {
+  if (!session || !lastState) return;
+  const text = els.noteText.value.trim().slice(0, LIMITS.note);
+  const date = els.noteDate.value;
+  if (!text) {
+    els.noteText.focus();
+    return;
+  }
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+    showToast("Pick a date for the note");
+    return;
+  }
+  const list = lastState.notes.list;
+  if (list.length >= LIMITS.notes) {
+    showToast(`A room holds at most ${LIMITS.notes} notes`);
+    return;
+  }
+  const mine = lastState.participants.find((p) => p.you);
+  session.transport.send({
+    type: "notes-set",
+    notes: [...list, { date, text, who: mine?.name ?? session.name, at: Date.now() }],
+  });
+  els.noteText.value = "";
+  els.noteText.focus();
 }
 
 /* ------------------------------- rendering ------------------------------- */
@@ -782,6 +914,7 @@ function render(state) {
   renderResults(state);
   renderObservers(state);
   renderWheel(state);
+  renderNotes(state);
 
   const voters = state.participants.filter((p) => !p.observer);
   const voted = voters.filter((p) => p.voted).length;
@@ -853,6 +986,9 @@ function joinRoom(code) {
       // Treat whatever arrives after a reconnect as history: show the last
       // winner without replaying the spin animation.
       firstWheelState = true;
+      // A reconnect may land on a fresh room (server restarted): allow one
+      // more re-seed check so the saved notes come back.
+      notesSeedChecked = false;
     },
     error: (message) => {
       showToast(message || "The room turned you away.");
@@ -868,6 +1004,9 @@ function joinRoom(code) {
   });
 
   session = { code, name, transport };
+  notesSeedChecked = false;
+  lastNotesAt = -1;
+  els.noteDate.value = todayStr();
   els.roomChip.textContent = code;
   els.join.hidden = true;
   els.table.hidden = false;
@@ -895,6 +1034,9 @@ function leaveRoom() {
   document.body.classList.remove("has-observers");
   els.reactionLayer.innerHTML = "";
   nudgedAt.clear();
+  notesSeedChecked = false;
+  lastNotesAt = -1;
+  els.noteText.value = "";
   setConn(null);
   history.replaceState(null, "", location.pathname);
   els.roomCode.focus();
@@ -996,6 +1138,14 @@ try {
 } catch {
   /* ignore */
 }
+
+/* room notes */
+
+els.noteAdd.addEventListener("click", addNote);
+els.noteText.addEventListener("keydown", (e) => {
+  if (e.key === "Enter") addNote();
+});
+els.noteDate.value = todayStr();
 
 els.spin.addEventListener("click", () => {
   if (!session || !lastState || wheelSpinning) return;

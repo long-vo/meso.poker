@@ -15,6 +15,7 @@ import {
   LIMITS,
   mergeRooms,
   publicState,
+  sanitizeNotes,
   sanitizeWheelNames,
 } from "./poker.mjs";
 
@@ -251,6 +252,65 @@ Deno.test("publicState exposes the wheel and flips `custom` after the first edit
     winner: "Ana",
     spunAt: 8,
   });
+});
+
+Deno.test("sanitizeNotes keeps well-formed notes, sorts by date, caps fields and count", () => {
+  const clean = sanitizeNotes([
+    { date: "2026-07-20", text: "  later  ", who: " Ana ", at: 5 },
+    { date: "2026-07-14", text: "sooner", who: "Ben", at: 9 },
+    { date: "2026-07-14", text: "same day, added first", who: "Cid", at: 2 },
+    { date: "not-a-date", text: "dropped" },
+    { date: "2026-99-99", text: "dropped too" },
+    { date: "2026-07-15", text: "   " },
+    "junk",
+    null,
+  ]);
+  assertEquals(clean.map((n) => n.text), ["same day, added first", "sooner", "later"]);
+  assertEquals(clean[2], { date: "2026-07-20", text: "later", who: "Ana", at: 5 });
+  assertEquals(sanitizeNotes("nope"), []);
+  const long = sanitizeNotes([{ date: "2026-01-01", text: "x".repeat(999), who: "y".repeat(99) }]);
+  assertEquals(long[0].text.length, LIMITS.note);
+  assertEquals(long[0].who.length, LIMITS.name);
+  const many = sanitizeNotes(
+    Array.from({ length: 99 }, (_, i) => ({ date: "2026-01-01", text: `n${i}`, at: i })),
+  );
+  assertEquals(many.length, LIMITS.notes);
+});
+
+Deno.test("notes-set replaces the list; identical sets are no-ops; reset leaves notes", () => {
+  const room = roomWith("Ana");
+  assertEquals(applyEvent(room, { type: "notes-set", notes: [], at: 1 }), false, "empty on empty");
+  const note = { date: "2026-07-14", text: "Sam on PTO", who: "Ana", at: 3 };
+  assertEquals(applyEvent(room, { type: "notes-set", notes: [note], at: 4 }), true);
+  assertEquals(room.notesAt, 4);
+  assertEquals(
+    applyEvent(room, { type: "notes-set", notes: [{ ...note, text: " Sam on PTO " }], at: 5 }),
+    false,
+    "same after sanitize",
+  );
+  applyEvent(room, { type: "reset", at: 6 });
+  assertEquals(room.notes.length, 1, "notes survive a new round");
+  assertEquals(applyEvent(room, { type: "notes-set", notes: [], at: 7 }), true, "deliberate clear");
+  assertEquals(room.notes, []);
+});
+
+Deno.test("publicState exposes notes with the edit timestamp", () => {
+  const room = roomWith("Ana");
+  assertEquals(publicState(room, "p1").notes, { list: [], at: 0 });
+  const note = { date: "2026-07-14", text: "split the epic", who: "Ana", at: 2 };
+  applyEvent(room, { type: "notes-set", notes: [note], at: 9 });
+  assertEquals(publicState(room, "p1").notes, { list: [note], at: 9 });
+});
+
+Deno.test("mergeRooms resolves notes last-writer-wins", () => {
+  const a = createRoom();
+  const b = createRoom();
+  applyEvent(a, { type: "notes-set", notes: [{ date: "2026-07-01", text: "old" }], at: 10 });
+  applyEvent(b, { type: "notes-set", notes: [{ date: "2026-07-02", text: "new" }], at: 20 });
+  const merged = mergeRooms(a, [b]);
+  assertEquals(merged.notes.map((n) => n.text), ["new"], "newer list wins");
+  assertEquals(merged.notesAt, 20);
+  assertEquals(a.notes.map((n) => n.text), ["old"], "inputs are not modified");
 });
 
 Deno.test("mergeRooms resolves wheel list and spin last-writer-wins", () => {

@@ -1556,3 +1556,102 @@ textarea:focus {
     animation: none;
   }
 }
+
+/* ---- room notes (poker) ----
+   Dated notes pinned to the room: shared live through room state and
+   re-seeded from localStorage when the room is opened again (poker.js). */
+.notes-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.notes-list .hint {
+  margin: 0;
+}
+.note {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--bg-inset);
+}
+.note.today {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+  background: color-mix(in srgb, var(--accent) 9%, var(--bg-inset));
+}
+.note.past {
+  opacity: 0.55;
+}
+.note-date {
+  flex: none;
+  margin-top: 1px;
+  font-size: 11px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  color: var(--text-dim);
+  background: var(--bg-elev);
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  padding: 2px 8px;
+}
+.note.today .note-date {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--on-accent);
+}
+.note-body {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  line-height: 1.45;
+  overflow-wrap: break-word;
+}
+.note-who {
+  font-size: 11px;
+  color: var(--text-faint);
+}
+.note-x {
+  flex: none;
+  border: 0;
+  background: none;
+  color: var(--text-faint);
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 3px 5px;
+  border-radius: 6px;
+}
+.note-x:hover {
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 14%, transparent);
+}
+.notes-add {
+  display: flex;
+  gap: 6px;
+  margin-top: 10px;
+}
+.notes-add input[type="date"] {
+  flex: none;
+  width: 122px;
+  background: var(--bg-inset);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font-family: var(--sans);
+  font-size: 12.5px;
+  padding: 6px 8px;
+  color-scheme: dark;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+[data-theme="light"] .notes-add input[type="date"] {
+  color-scheme: light;
+}
+.notes-add input[type="text"] {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  padding: 6px 10px;
+}

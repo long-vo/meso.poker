@@ -22,7 +22,14 @@ export const DECK = ["0", "½", "1", "2", "3", "5", "8", "13", "20", "40", "100"
 export const CARD_THEMES = ["ocean", "violet", "forest", "sunset", "ruby"];
 
 /** Input limits, shared by server validation and UI. */
-export const LIMITS = { name: 24, story: 200, participants: 50, wheelNames: 30 };
+export const LIMITS = {
+  name: 24,
+  story: 200,
+  participants: 50,
+  wheelNames: 30,
+  note: 140,
+  notes: 50,
+};
 
 /**
  * Emoji a player can send as a fleeting reaction. Reactions are relay-only:
@@ -34,6 +41,7 @@ export const REACTIONS = ["👍", "🎉", "🤯", "☕"];
 
 /**
  * @typedef {{ name: string, vote: string | null, joinedAt: number, theme: string, observer: boolean }} Participant
+ * @typedef {{ date: string, text: string, who: string, at: number }} Note
  * @typedef {{
  *   participants: Record<string, Participant>,
  *   revealed: boolean,
@@ -44,6 +52,8 @@ export const REACTIONS = ["👍", "🎉", "🤯", "☕"];
  *   wheelNamesAt: number,
  *   wheelWinner: string | null,
  *   wheelSpunAt: number,
+ *   notes: Note[],
+ *   notesAt: number,
  * }} Room
  * @typedef {{
  *   type: string,
@@ -55,6 +65,7 @@ export const REACTIONS = ["👍", "🎉", "🤯", "☕"];
  *   winner?: string,
  *   theme?: string,
  *   observer?: boolean,
+ *   notes?: unknown[],
  *   at?: number,
  * }} RoomEvent
  */
@@ -71,6 +82,8 @@ export function createRoom() {
     wheelNamesAt: 0,
     wheelWinner: null,
     wheelSpunAt: 0,
+    notes: [],
+    notesAt: 0,
   };
 }
 
@@ -94,6 +107,34 @@ export function sanitizeWheelNames(raw) {
     if (names.length >= LIMITS.wheelNames) break;
   }
   return names;
+}
+
+/**
+ * Normalize a note list: keep only well-formed entries (a real YYYY-MM-DD
+ * date and non-blank text), trim and cap the fields, cap the count, and sort
+ * chronologically (creation time breaks date ties). Deterministic order makes
+ * the reducer's JSON no-op comparison reliable. Shared by reducer and UI.
+ * @param {unknown} raw
+ * @returns {Note[]}
+ */
+export function sanitizeNotes(raw) {
+  if (!Array.isArray(raw)) return [];
+  /** @type {Note[]} */
+  const notes = [];
+  for (const item of raw) {
+    if (typeof item !== "object" || item === null) continue;
+    const note = /** @type {Record<string, unknown>} */ (item);
+    const date = String(note.date ?? "");
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || Number.isNaN(Date.parse(date))) continue;
+    const text = String(note.text ?? "").trim().slice(0, LIMITS.note);
+    if (!text) continue;
+    const who = String(note.who ?? "").trim().slice(0, LIMITS.name);
+    const at = Number(note.at);
+    notes.push({ date, text, who, at: Number.isFinite(at) && at > 0 ? at : 0 });
+    if (notes.length >= LIMITS.notes) break;
+  }
+  notes.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : a.at - b.at));
+  return notes;
 }
 
 /**
@@ -190,6 +231,15 @@ export function applyEvent(room, event) {
       room.wheelSpunAt = event.at ?? Date.now();
       return true;
     }
+    // Notes are replaced as a whole list (like the wheel): clients send the
+    // full edited list and last-writer-wins keeps the isolates agreeing.
+    case "notes-set": {
+      const notes = sanitizeNotes(event.notes);
+      if (JSON.stringify(notes) === JSON.stringify(room.notes)) return false;
+      room.notes = notes;
+      room.notesAt = event.at ?? Date.now();
+      return true;
+    }
     default:
       return false;
   }
@@ -245,6 +295,7 @@ export function computeStats(room) {
  *   }[],
  *   stats: ReturnType<typeof computeStats> | null,
  *   wheel: { names: string[], custom: boolean, winner: string | null, spunAt: number },
+ *   notes: { list: Note[], at: number },
  * }}
  */
 export function publicState(room, selfId) {
@@ -269,6 +320,9 @@ export function publicState(room, selfId) {
       winner: room.wheelWinner,
       spunAt: room.wheelSpunAt,
     },
+    // `at` doubles as the "was ever edited" flag (0 = untouched) and lets
+    // clients persist the freshest copy per room code (see poker.js).
+    notes: { list: room.notes.map((note) => ({ ...note })), at: room.notesAt },
   };
 }
 
@@ -294,6 +348,8 @@ export function mergeRooms(local, remotes) {
     wheelNamesAt: local.wheelNamesAt,
     wheelWinner: local.wheelWinner,
     wheelSpunAt: local.wheelSpunAt,
+    notes: local.notes.map((note) => ({ ...note })),
+    notesAt: local.notesAt,
   };
   for (const remote of remotes) {
     Object.assign(merged.participants, remote.participants);
@@ -312,6 +368,10 @@ export function mergeRooms(local, remotes) {
     if (remote.wheelSpunAt > merged.wheelSpunAt) {
       merged.wheelWinner = remote.wheelWinner;
       merged.wheelSpunAt = remote.wheelSpunAt;
+    }
+    if (remote.notesAt > merged.notesAt) {
+      merged.notes = remote.notes.map((note) => ({ ...note }));
+      merged.notesAt = remote.notesAt;
     }
   }
   return merged;

@@ -79,6 +79,22 @@
             placeholder="e.g. PROJ-42 — Checkout address validation" />
           <p class="hint">Visible to everyone in the room; anyone can edit it.</p>
         </div>
+
+        <div class="panel notes-panel" aria-label="Room notes">
+          <div class="panel-head">
+            <h2>Notes</h2>
+            <span id="notes-status" class="status"></span>
+          </div>
+          <div id="notes-list" class="notes-list" aria-live="polite"></div>
+          <div class="notes-add">
+            <input id="note-date" type="date" aria-label="Note date" />
+            <input id="note-text" type="text" maxlength="140" autocomplete="off" spellcheck="false"
+              placeholder="Add a note for this room" aria-label="Note text" />
+            <button id="note-add" class="btn btn-small" type="button">Add</button>
+          </div>
+          <p class="hint">Notes stay with this room — everyone sees them, and they come back when
+            the room is opened again.</p>
+        </div>
       </div>
 
       <div class="table-main">
