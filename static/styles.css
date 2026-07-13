@@ -1556,3 +1556,137 @@ textarea:focus {
     animation: none;
   }
 }
+
+/* ---- room notes (poker) ----
+   Dated notes pinned to the room: shared live through room state and
+   re-seeded from localStorage when the room is opened again (poker.js). */
+.notes-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.notes-list .hint {
+  margin: 0;
+}
+.note {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--bg-inset);
+}
+.note.today {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+  background: color-mix(in srgb, var(--accent) 9%, var(--bg-inset));
+}
+.note.past {
+  opacity: 0.55;
+}
+.note-date {
+  flex: none;
+  margin-top: 1px;
+  font-size: 11px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  color: var(--text-dim);
+  background: var(--bg-elev);
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  padding: 2px 8px;
+}
+.note.today .note-date {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--on-accent);
+}
+.note-body {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  line-height: 1.45;
+  overflow-wrap: break-word;
+  /* notes can span lines: keep the author's line breaks */
+  white-space: pre-wrap;
+}
+.note-who {
+  font-size: 11px;
+  color: var(--text-faint);
+}
+.note-x {
+  flex: none;
+  border: 0;
+  background: none;
+  color: var(--text-faint);
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 3px 5px;
+  border-radius: 6px;
+}
+.note-x:hover {
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 14%, transparent);
+}
+/* Long notes are the normal case: the textarea gets the full panel width
+   and grows with the text (poker.js), date + button sit on their own row. */
+.notes-add {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 10px;
+}
+.notes-add textarea {
+  font-size: 13px;
+  line-height: 1.45;
+  padding: 8px 10px;
+  min-height: 52px;
+  max-height: 160px;
+  resize: none;
+  overflow-y: auto;
+}
+.notes-add-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.notes-add-row input[type="date"] {
+  flex: none;
+  width: 132px;
+  background: var(--bg-inset);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font-family: var(--sans);
+  font-size: 12.5px;
+  padding: 6px 8px;
+  color-scheme: dark;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+[data-theme="light"] .notes-add-row input[type="date"] {
+  color-scheme: light;
+}
+/* Accent-tinted calendar glyph. Chromium draws the indicator icon as a
+   background-image, so it can be replaced; data URIs cannot read CSS
+   variables, hence the accent hex is repeated per theme (Firefox/Safari
+   keep their native icon — `color-scheme` above keeps those legible). */
+.notes-add-row input[type="date"]::-webkit-calendar-picker-indicator {
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+  opacity: 0.85;
+  background: transparent
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%234f9dff' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='3' y='5' width='18' height='16' rx='2'/%3E%3Cpath d='M16 3v4M8 3v4M3 11h18'/%3E%3C/svg%3E")
+    center / contain no-repeat;
+}
+.notes-add-row input[type="date"]::-webkit-calendar-picker-indicator:hover {
+  opacity: 1;
+}
+[data-theme="light"] .notes-add-row input[type="date"]::-webkit-calendar-picker-indicator {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%232f6fed' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='3' y='5' width='18' height='16' rx='2'/%3E%3Cpath d='M16 3v4M8 3v4M3 11h18'/%3E%3C/svg%3E");
+}
+.notes-add-row .btn {
+  margin-left: auto;
+}

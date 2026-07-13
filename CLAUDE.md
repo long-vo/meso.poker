@@ -28,7 +28,7 @@ Scrum-poker app: a small Deno server (`main.ts`, `src/poker-server.ts`) plus a s
 after emptying.
 
 **The core design decision: one isomorphic reducer.** `src/poker.mjs` (plain JS + JSDoc types,
-dependency-free) holds all room rules — join/vote/reveal/reset/story/theme/wheel events via
+dependency-free) holds all room rules — join/vote/reveal/reset/story/theme/wheel/notes events via
 `applyEvent(room, event)`, per-viewer projection via `publicState(room, viewerId)` (hides others'
 votes until reveal), stats, limits, and `mergeRooms`. Three consumers import this exact file:
 

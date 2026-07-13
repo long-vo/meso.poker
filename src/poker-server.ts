@@ -14,6 +14,7 @@
  *                     { type: "story", text } | { type: "ping" } | { type: "leave" }
  *                     { type: "wheel-set", names } | { type: "wheel-spin", winner }
  *                     { type: "theme", theme }    theme: a CARD_THEMES id
+ *                     { type: "notes-set", notes }  notes: full replacement list
  *                     { type: "react", emoji }    emoji: a REACTIONS entry
  *                     { type: "nudge", name }     name: a non-voter to poke
  *   server -> client: { type: "state", room, state }  (see publicState)
@@ -205,6 +206,10 @@ if (channel) {
       room.state.wheelWinner = msg.state.wheelWinner;
       room.state.wheelSpunAt = msg.state.wheelSpunAt;
     }
+    if (msg.state.notesAt > room.state.notesAt) {
+      room.state.notes = msg.state.notes.map((note) => ({ ...note }));
+      room.state.notesAt = msg.state.notesAt;
+    }
     if (msg.hello) broadcast(msg.room, room);
     pushState(msg.room, room);
   };
@@ -251,6 +256,7 @@ function handleClientMessage(code: string, room: LocalRoom, id: string, raw: str
     theme?: unknown;
     emoji?: unknown;
     name?: unknown;
+    notes?: unknown;
   };
   try {
     message = JSON.parse(raw);
@@ -323,6 +329,17 @@ function handleClientMessage(code: string, room: LocalRoom, id: string, raw: str
     case "wheel-spin": {
       const winner = String(message.winner ?? "");
       if (applyEvent(room.state, { type: "wheel-spin", winner, at: Date.now() })) {
+        broadcast(code, room);
+        pushState(code, room);
+      }
+      return;
+    }
+    // Notes travel like the wheel list: a shared flag adopted from snapshots.
+    // The sender's id rides along so the reducer can enforce that only the
+    // author removes their own notes.
+    case "notes-set": {
+      const notes = Array.isArray(message.notes) ? message.notes : [];
+      if (applyEvent(room.state, { type: "notes-set", notes, id, at: Date.now() })) {
         broadcast(code, room);
         pushState(code, room);
       }
