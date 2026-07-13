@@ -1077,6 +1077,16 @@ els.invite.addEventListener("click", async () => {
   }
 });
 
+// Collapsible left-column panels. Local view state only — not a room rule, so
+// it stays out of poker.mjs and never touches the transport. Reset on reload.
+els.table.addEventListener("click", (e) => {
+  const toggle = e.target.closest(".panel-toggle");
+  if (!toggle) return;
+  const collapsed = toggle.closest(".panel").classList.toggle("collapsed");
+  toggle.setAttribute("aria-expanded", String(!collapsed));
+  toggle.setAttribute("aria-label", `${collapsed ? "Expand" : "Collapse"} ${toggle.dataset.label}`);
+});
+
 els.reveal.addEventListener("click", () => session?.transport.send({ type: "reveal" }));
 els.reset.addEventListener("click", () => session?.transport.send({ type: "reset" }));
 

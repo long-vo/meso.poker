@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "meso-poker",
+      "runtimeExecutable": "deno",
+      "runtimeArgs": ["task", "start"],
+      "port": 8000
+    }
+  ]
+}

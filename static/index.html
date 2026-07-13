@@ -65,38 +65,54 @@
     <section id="table" hidden>
       <div class="table-side">
         <div class="panel table-bar">
-          <div class="room-info">
-            <span class="room-label">Room</span>
-            <code id="room-chip" class="room-code-chip">····</code>
-            <button id="invite" class="btn btn-small" type="button">🔗 Copy invite link</button>
+          <div class="panel-head">
+            <div class="room-info">
+              <span class="room-label">Room</span>
+              <code id="room-chip" class="room-code-chip">····</code>
+            </div>
+            <button class="panel-toggle" type="button" aria-expanded="true" data-label="room panel"
+              aria-controls="room-body" aria-label="Collapse room panel"></button>
           </div>
-          <button id="leave" class="btn btn-small btn-ghost" type="button">Leave room</button>
+          <div id="room-body" class="panel-body">
+            <button id="invite" class="btn btn-small" type="button">🔗 Copy invite link</button>
+            <button id="leave" class="btn btn-small btn-ghost" type="button">Leave room</button>
+          </div>
         </div>
 
         <div class="panel story-panel">
-          <label for="story">Story being estimated</label>
-          <input id="story" type="text" maxlength="200" autocomplete="off" spellcheck="false"
-            placeholder="e.g. PROJ-42 — Checkout address validation" />
-          <p class="hint">Visible to everyone in the room; anyone can edit it.</p>
+          <div class="panel-head">
+            <label for="story">Story being estimated</label>
+            <button class="panel-toggle" type="button" aria-expanded="true" data-label="story panel"
+              aria-controls="story-body" aria-label="Collapse story panel"></button>
+          </div>
+          <div id="story-body" class="panel-body">
+            <input id="story" type="text" maxlength="200" autocomplete="off" spellcheck="false"
+              placeholder="e.g. PROJ-42 — Checkout address validation" />
+            <p class="hint">Visible to everyone in the room; anyone can edit it.</p>
+          </div>
         </div>
 
         <div class="panel notes-panel" aria-label="Room notes">
           <div class="panel-head">
             <h2>Notes</h2>
             <span id="notes-status" class="status"></span>
+            <button class="panel-toggle" type="button" aria-expanded="true" data-label="notes"
+              aria-controls="notes-body" aria-label="Collapse notes"></button>
           </div>
-          <div id="notes-list" class="notes-list" aria-live="polite"></div>
-          <div class="notes-add">
-            <textarea id="note-text" maxlength="280" rows="2" autocomplete="off" spellcheck="false"
-              placeholder="Add a note for this room" aria-label="Note text"></textarea>
-            <div class="notes-add-row">
-              <input id="note-date" type="date" aria-label="Note date" />
-              <button id="note-add" class="btn btn-small" type="button"
-                title="Or press Ctrl/⌘ + Enter">Add note</button>
+          <div id="notes-body" class="panel-body">
+            <div id="notes-list" class="notes-list" aria-live="polite"></div>
+            <div class="notes-add">
+              <textarea id="note-text" maxlength="280" rows="2" autocomplete="off" spellcheck="false"
+                placeholder="Add a note for this room" aria-label="Note text"></textarea>
+              <div class="notes-add-row">
+                <input id="note-date" type="date" aria-label="Note date" />
+                <button id="note-add" class="btn btn-small" type="button"
+                  title="Or press Ctrl/⌘ + Enter">Add note</button>
+              </div>
             </div>
+            <p class="hint">Notes stay with this room — everyone sees them, and they come back when
+              the room is opened again. Only the author can remove a note. Ctrl/⌘ + Enter adds.</p>
           </div>
-          <p class="hint">Notes stay with this room — everyone sees them, and they come back when
-            the room is opened again. Only the author can remove a note. Ctrl/⌘ + Enter adds.</p>
         </div>
       </div>
 

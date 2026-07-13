@@ -369,13 +369,6 @@ a.card:hover .card-go {
   transform: none;
 }
 
-.table-bar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  flex-wrap: wrap;
-}
 .room-info {
   display: flex;
   align-items: center;
@@ -384,15 +377,18 @@ a.card:hover .card-go {
 }
 /* section labels styled like the panel headings (PLAYERS, YOUR CARD, …) */
 .room-label,
-.story-panel > label {
+.story-panel label {
   font-size: 14px;
   font-weight: 700;
   letter-spacing: 0.3px;
   text-transform: uppercase;
   color: var(--text-dim);
 }
-.story-panel > label {
-  margin: 0 0 10px;
+/* the label now sits in a .panel-head (flex row with the collapse toggle), so
+   its own margin would offset it against the chevron — spacing comes from the
+   head instead. */
+.story-panel label {
+  margin: 0;
 }
 .room-code-chip {
   font-family: var(--mono);
@@ -1016,6 +1012,52 @@ button.wheel-chip:hover .chip-x {
   color: var(--text-dim);
 }
 
+/* ---- collapsible panels ----
+   The left-column panels (room bar, story, notes) fold their body away via a
+   chevron in the header. Purely local view state (toggled in poker.js) — it is
+   never synced to the room and resets to expanded on load. */
+.panel-toggle {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+  transition: color 0.15s;
+}
+.panel-toggle:hover {
+  color: var(--text);
+}
+.panel-toggle::before {
+  content: "▾";
+  font-size: 12px;
+  line-height: 1;
+  transition: transform 0.2s ease;
+}
+.panel.collapsed .panel-toggle::before {
+  transform: rotate(-90deg);
+}
+.panel.collapsed .panel-body {
+  display: none;
+}
+/* the room bar's actions are its collapsible body, stacked so "Leave room"
+   always sits on its own last row beneath the invite link, with the toggle
+   aligned top-right with the Story and Notes toggles below it. */
+.table-bar .panel-body {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+}
+#invite {
+  color: mediumblue;
+}
+
 /* ---- mode switch ---- */
 .mode-switch {
   display: flex;
@@ -1404,7 +1446,7 @@ textarea:focus {
   .join-panel h1,
   .panel-head h2,
   .room-label,
-  .story-panel > label,
+  .story-panel label,
   .pick-label {
     background-image: linear-gradient(92deg, var(--accent) 10%, var(--accent-2) 90%);
     -webkit-background-clip: text;
