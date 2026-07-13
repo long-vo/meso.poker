@@ -1608,6 +1608,8 @@ textarea:focus {
   font-size: 13px;
   line-height: 1.45;
   overflow-wrap: break-word;
+  /* notes can span lines: keep the author's line breaks */
+  white-space: pre-wrap;
 }
 .note-who {
   font-size: 11px;
@@ -1628,14 +1630,31 @@ textarea:focus {
   color: var(--danger);
   background: color-mix(in srgb, var(--danger) 14%, transparent);
 }
+/* Long notes are the normal case: the textarea gets the full panel width
+   and grows with the text (poker.js), date + button sit on their own row. */
 .notes-add {
   display: flex;
+  flex-direction: column;
   gap: 6px;
   margin-top: 10px;
 }
-.notes-add input[type="date"] {
+.notes-add textarea {
+  font-size: 13px;
+  line-height: 1.45;
+  padding: 8px 10px;
+  min-height: 52px;
+  max-height: 160px;
+  resize: none;
+  overflow-y: auto;
+}
+.notes-add-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.notes-add-row input[type="date"] {
   flex: none;
-  width: 122px;
+  width: 132px;
   background: var(--bg-inset);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
@@ -1646,12 +1665,9 @@ textarea:focus {
   color-scheme: dark;
   transition: border-color 0.15s, box-shadow 0.15s;
 }
-[data-theme="light"] .notes-add input[type="date"] {
+[data-theme="light"] .notes-add-row input[type="date"] {
   color-scheme: light;
 }
-.notes-add input[type="text"] {
-  flex: 1;
-  min-width: 0;
-  font-size: 13px;
-  padding: 6px 10px;
+.notes-add-row .btn {
+  margin-left: auto;
 }

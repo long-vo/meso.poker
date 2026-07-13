@@ -87,13 +87,16 @@
           </div>
           <div id="notes-list" class="notes-list" aria-live="polite"></div>
           <div class="notes-add">
-            <input id="note-date" type="date" aria-label="Note date" />
-            <input id="note-text" type="text" maxlength="140" autocomplete="off" spellcheck="false"
-              placeholder="Add a note for this room" aria-label="Note text" />
-            <button id="note-add" class="btn btn-small" type="button">Add</button>
+            <textarea id="note-text" maxlength="280" rows="2" autocomplete="off" spellcheck="false"
+              placeholder="Add a note for this room" aria-label="Note text"></textarea>
+            <div class="notes-add-row">
+              <input id="note-date" type="date" aria-label="Note date" />
+              <button id="note-add" class="btn btn-small" type="button"
+                title="Or press Ctrl/⌘ + Enter">Add note</button>
+            </div>
           </div>
           <p class="hint">Notes stay with this room — everyone sees them, and they come back when
-            the room is opened again. Only the author can remove a note.</p>
+            the room is opened again. Only the author can remove a note. Ctrl/⌘ + Enter adds.</p>
         </div>
       </div>
 

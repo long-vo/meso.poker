@@ -27,7 +27,7 @@ export const LIMITS = {
   story: 200,
   participants: 50,
   wheelNames: 30,
-  note: 140,
+  note: 280,
   notes: 50,
 };
 

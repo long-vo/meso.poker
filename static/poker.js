@@ -559,6 +559,7 @@ function addNote() {
     notes: [...list, { date, text, who: mine?.name ?? session.name, at: Date.now() }],
   });
   els.noteText.value = "";
+  els.noteText.style.height = ""; // collapse the auto-grown field
   els.noteText.focus();
 }
 
@@ -1148,8 +1149,18 @@ try {
 /* room notes */
 
 els.noteAdd.addEventListener("click", addNote);
+// Notes are often long: plain Enter breaks the line (textarea default),
+// Ctrl/⌘+Enter submits.
 els.noteText.addEventListener("keydown", (e) => {
-  if (e.key === "Enter") addNote();
+  if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+    e.preventDefault();
+    addNote();
+  }
+});
+// Grow with the text up to the CSS max-height, then scroll.
+els.noteText.addEventListener("input", () => {
+  els.noteText.style.height = "auto";
+  els.noteText.style.height = `${els.noteText.scrollHeight + 2}px`;
 });
 els.noteDate.value = todayStr();
 
