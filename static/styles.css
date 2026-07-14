@@ -307,12 +307,13 @@ a.card:hover .card-go {
     padding-right: calc(clamp(16px, 4vw, 40px) + 120px);
   }
 }
-/* Two columns: room controls (table-bar + story) on the left, the play
-   area (players, deck, wheel) on the right. Each side stacks its panels
-   independently so heights never couple. Collapses below 960px. */
+/* Three columns: room controls (table-bar + story) on the left, the play
+   area (players, deck, wheel) in the middle, and a slim card-theme dot strip
+   on the right. Each column stacks its panels independently so heights never
+   couple. Collapses to one column below 960px. */
 .poker > section[id="table"] {
   display: grid;
-  grid-template-columns: minmax(240px, 300px) minmax(0, 1fr);
+  grid-template-columns: minmax(240px, 300px) minmax(0, 1fr) auto;
   gap: 18px;
   align-items: start;
 }
@@ -407,6 +408,7 @@ a.card:hover .card-go {
   gap: 14px;
 }
 .player {
+  position: relative;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -490,6 +492,38 @@ a.card:hover .card-go {
   border-color: var(--border);
   color: var(--text-faint);
   box-shadow: none;
+}
+
+/* Presence badge pinned to the card's top-right corner. It's a sibling of the
+   card (see renderPlayers), so the away-dim below never fades the badge. */
+.pcard-status {
+  position: absolute;
+  top: -7px;
+  /* The card is a fixed 64px centred in its cell, so its right edge sits at
+     50% + 32px; this lands the badge just over the top-right corner. */
+  left: calc(50% + 20px);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: var(--bg-elev);
+  border: 1.5px solid var(--border-strong);
+  box-shadow: var(--shadow);
+  font-size: 13px;
+  line-height: 1;
+}
+.pcard-status.away {
+  border-color: var(--accent);
+}
+/* An away player reads as "sitting out": dim the card (badge stays vivid). */
+.player.away .pcard {
+  opacity: 0.5;
+}
+.player.away .player-name {
+  color: var(--text-dim);
 }
 
 /* Always in the flow with a reserved height, so revealing / starting a new
@@ -664,13 +698,64 @@ a.card:hover .card-go {
    reflows when the waiting chip appears */
 .deck-foot {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
+  flex-direction: column;
+  gap: 10px;
   margin-top: 8px;
 }
 .deck-foot .hint {
   margin: 0;
+}
+/* The status picker sits on its own row beneath the deck hint, right-aligned.
+   align-self shrinks it to just its pills (rather than the full row width), so
+   when collapsed the hover area is only the current-status pill — hovering the
+   empty part of the row no longer expands it. */
+.status-picker {
+  align-self: flex-end;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
+.status-opt {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1.5px solid var(--border-strong);
+  background: var(--bg-inset);
+  color: var(--text-dim);
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s, color 0.15s;
+}
+.status-opt:hover {
+  border-color: var(--accent);
+  color: var(--text);
+}
+.status-opt.selected {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 22%, var(--bg-inset));
+  color: var(--text);
+}
+.status-opt-emoji {
+  font-size: 14px;
+  line-height: 1;
+}
+
+/* On the wide layout, collapse the picker to just the current status; hovering
+   it (or keyboard focus) reveals all the options — the same collapse behaviour
+   as the theme dots. Below 961px the pills stay in a plain always-visible row
+   (touch has no hover). */
+@media (min-width: 961px) {
+  .status-picker .status-opt:not(.selected) {
+    display: none;
+  }
+  .status-picker:hover .status-opt,
+  .status-picker:focus-within .status-opt {
+    display: inline-flex;
+  }
 }
 .theme-dots {
   display: flex;
@@ -678,8 +763,8 @@ a.card:hover .card-go {
   gap: 8px;
 }
 .theme-dot {
-  width: 18px;
-  height: 18px;
+  width: 14px;
+  height: 14px;
   padding: 0;
   border-radius: 999px;
   border: 2px solid var(--border-strong);
@@ -693,6 +778,38 @@ a.card:hover .card-go {
 .theme-dot.selected {
   border-color: var(--text);
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--dot-color, var(--accent)) 35%, transparent);
+}
+
+/* Card-theme picker: a slim third table column showing only the colour dots,
+   stacked vertically. The column stretches full height; alignThemeDots() in
+   poker.js sets the dots' margin-top so they centre on the "Your card" panel
+   (a grid-row solution would couple the columns' heights, which we avoid). */
+.themes-panel {
+  align-self: stretch;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+.themes-panel .theme-dots {
+  flex-direction: column;
+  gap: 14px;
+}
+
+/* On the wide 3-column layout, collapse the palette to just the current theme
+   dot and reveal the rest on hover / keyboard focus. translateY keeps the group
+   centred on the "Your card" panel whether it shows one dot or all five.
+   (Below 961px the picker is a plain always-visible row — touch has no hover.) */
+@media (min-width: 961px) {
+  .themes-panel .theme-dots {
+    transform: translateY(-50%);
+  }
+  .themes-panel .theme-dot:not(.selected) {
+    display: none;
+  }
+  .themes-panel .theme-dots:hover .theme-dot,
+  .themes-panel .theme-dots:focus-within .theme-dot {
+    display: block;
+  }
 }
 
 /* random-name wheel */
@@ -1410,6 +1527,14 @@ textarea:focus {
 @media (max-width: 960px) {
   .poker > section[id="table"] {
     grid-template-columns: 1fr;
+  }
+  /* Single column now: the theme dots go back to a left-aligned horizontal row. */
+  .themes-panel {
+    align-items: flex-start;
+    justify-content: flex-start;
+  }
+  .themes-panel .theme-dots {
+    flex-direction: row;
   }
 }
 @media (max-width: 720px) {

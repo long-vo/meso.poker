@@ -40,7 +40,32 @@ export const LIMITS = {
 export const REACTIONS = ["👍", "🎉", "🤯", "☕"];
 
 /**
- * @typedef {{ name: string, vote: string | null, joinedAt: number, theme: string, observer: boolean }} Participant
+ * Presence statuses a player can set on themselves (like a card theme: the
+ * owner picks it, everyone sees it, and it persists across rounds). The empty
+ * string is the implicit default ("Available" — no badge shown). `away` marks
+ * a "stepped out" status: an away player drops out of the round's active-voter
+ * tally and can't be nudged (see the client render and the server nudge guard).
+ */
+export const STATUSES = [
+  { id: "away", emoji: "🚶", label: "Away", away: true },
+  { id: "break", emoji: "☕", label: "Break", away: true },
+  { id: "brb", emoji: "🕐", label: "BRB", away: true },
+  { id: "thinking", emoji: "🤔", label: "Thinking", away: false },
+];
+
+/**
+ * Whether a status id marks its owner as "away" (sitting out the round).
+ * The default ("") and unknown ids are never away. Shared by the client tally
+ * and the server's nudge guard so both agree on who is pausing.
+ * @param {string} status
+ * @returns {boolean}
+ */
+export function isAway(status) {
+  return STATUSES.some((s) => s.id === status && s.away);
+}
+
+/**
+ * @typedef {{ name: string, vote: string | null, joinedAt: number, theme: string, observer: boolean, status: string }} Participant
  * @typedef {{ date: string, text: string, who: string, at: number }} Note
  * @typedef {{
  *   participants: Record<string, Participant>,
@@ -65,6 +90,7 @@ export const REACTIONS = ["👍", "🎉", "🤯", "☕"];
  *   winner?: string,
  *   theme?: string,
  *   observer?: boolean,
+ *   status?: string,
  *   notes?: unknown[],
  *   at?: number,
  * }} RoomEvent
@@ -173,6 +199,8 @@ export function applyEvent(room, event) {
         theme,
         // Observers (e.g. the product owner) watch and reveal but never vote.
         observer: event.observer === true,
+        // Presence status is transient: everyone joins as "Available" ("").
+        status: "",
       };
       return true;
     }
@@ -181,6 +209,15 @@ export function applyEvent(room, event) {
       const theme = String(event.theme ?? "");
       if (!participant || !CARD_THEMES.includes(theme) || participant.theme === theme) return false;
       participant.theme = theme;
+      return true;
+    }
+    case "status": {
+      const participant = room.participants[String(event.id ?? "")];
+      const status = String(event.status ?? "");
+      // "" clears back to the default; any other value must be a known preset.
+      if (!participant || (status !== "" && !STATUSES.some((s) => s.id === status))) return false;
+      if (participant.status === status) return false;
+      participant.status = status;
       return true;
     }
     case "leave": {
@@ -306,6 +343,7 @@ export function computeStats(room) {
  *     vote: string | null,
  *     theme: string,
  *     observer: boolean,
+ *     status: string,
  *   }[],
  *   stats: ReturnType<typeof computeStats> | null,
  *   wheel: { names: string[], custom: boolean, winner: string | null, spunAt: number },
@@ -322,6 +360,7 @@ export function publicState(room, selfId) {
       vote: room.revealed || id === selfId ? p.vote : null,
       theme: p.theme,
       observer: p.observer === true,
+      status: p.status ?? "",
     }));
   return {
     revealed: room.revealed,

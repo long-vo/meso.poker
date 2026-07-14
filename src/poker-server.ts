@@ -14,6 +14,7 @@
  *                     { type: "story", text } | { type: "ping" } | { type: "leave" }
  *                     { type: "wheel-set", names } | { type: "wheel-spin", winner }
  *                     { type: "theme", theme }    theme: a CARD_THEMES id
+ *                     { type: "status", status }  status: a STATUSES id or ""
  *                     { type: "notes-set", notes }  notes: full replacement list
  *                     { type: "react", emoji }    emoji: a REACTIONS entry
  *                     { type: "nudge", name }     name: a non-voter to poke
@@ -30,6 +31,7 @@ import {
   applyEvent,
   CODE_PATTERN,
   createRoom,
+  isAway,
   LIMITS,
   mergeRooms,
   publicState,
@@ -254,6 +256,7 @@ function handleClientMessage(code: string, room: LocalRoom, id: string, raw: str
     names?: unknown;
     winner?: unknown;
     theme?: unknown;
+    status?: unknown;
     emoji?: unknown;
     name?: unknown;
     notes?: unknown;
@@ -352,6 +355,15 @@ function handleClientMessage(code: string, room: LocalRoom, id: string, raw: str
       }
       return;
     }
+    // Presence status: a shared participant flag adopted from snapshots, like
+    // the theme. The reducer validates the id (or "" to clear).
+    case "status": {
+      if (applyEvent(room.state, { type: "status", id, status: String(message.status ?? "") })) {
+        broadcast(code, room);
+        pushState(code, room);
+      }
+      return;
+    }
     // Ephemeral signals: validated and relayed, never written to the room —
     // the reducer, publicState and the tests stay untouched by design.
     case "react": {
@@ -367,10 +379,11 @@ function handleClientMessage(code: string, room: LocalRoom, id: string, raw: str
       if (!target || !from || target === from || !allowRelay(room, id)) return;
       // Validate against the merged room: the target may be a participant
       // whose socket lives on a sibling isolate. Only sleeping voters — in
-      // the room, not observing, no vote yet, round still open — get poked.
+      // the room, not observing, not away, no vote yet, round still open —
+      // get poked.
       const merged = mergeRooms(room.state, [...room.remotes.values()].map((r) => r.state));
       const sleeping = Object.values(merged.participants)
-        .some((p) => p.name === target && !p.observer && p.vote === null);
+        .some((p) => p.name === target && !p.observer && !isAway(p.status) && p.vote === null);
       if (!sleeping || merged.revealed) return;
       relay(code, room, { type: "nudge", name: target, from });
       return;

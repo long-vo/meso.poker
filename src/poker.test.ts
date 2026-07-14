@@ -12,11 +12,13 @@ import {
   createRoom,
   DECK,
   generateRoomCode,
+  isAway,
   LIMITS,
   mergeRooms,
   publicState,
   sanitizeNotes,
   sanitizeWheelNames,
+  STATUSES,
 } from "./poker.mjs";
 
 function assertEquals(actual: unknown, expected: unknown, msg?: string): void {
@@ -135,6 +137,7 @@ Deno.test("publicState hides other votes until reveal, always echoes your own", 
     vote: null,
     theme: "ocean",
     observer: false,
+    status: "",
   });
   const forAna = publicState(room, "p1");
   assertEquals(forAna.participants[0], {
@@ -144,6 +147,7 @@ Deno.test("publicState hides other votes until reveal, always echoes your own", 
     vote: "5",
     theme: "ocean",
     observer: false,
+    status: "",
   });
   assertEquals(forAna.stats, null, "no stats before reveal");
   applyEvent(room, { type: "reveal", at: 9 });
@@ -171,6 +175,48 @@ Deno.test("card theme: defaults on join, validates ids, changes via the theme ev
   assertEquals(applyEvent(room, { type: "theme", id: "b", theme: "neon" }), false, "unknown id");
   assertEquals(applyEvent(room, { type: "theme", id: "ghost", theme: "ruby" }), false, "no player");
   assertEquals(publicState(room, "a").participants[1].theme, "forest", "exposed to everyone");
+});
+
+Deno.test("player status: empty by default, set via the status event, validates and clears", () => {
+  const room = roomWith("Ana", "Ben"); // p1 = Ana, p2 = Ben
+  assertEquals(room.participants["p1"].status, "", "empty by default");
+  assertEquals(applyEvent(room, { type: "status", id: "p1", status: "away" }), true);
+  assertEquals(room.participants["p1"].status, "away");
+  assertEquals(applyEvent(room, { type: "status", id: "p1", status: "away" }), false, "no-op");
+  assertEquals(applyEvent(room, { type: "status", id: "p1", status: "napping" }), false, "unknown");
+  assertEquals(
+    applyEvent(room, { type: "status", id: "ghost", status: "away" }),
+    false,
+    "no player",
+  );
+  assertEquals(
+    applyEvent(room, { type: "status", id: "p1", status: "" }),
+    true,
+    "clear back to none",
+  );
+  assertEquals(room.participants["p1"].status, "");
+  assertEquals(
+    applyEvent(room, { type: "status", id: "p1", status: "" }),
+    false,
+    "clear is a no-op",
+  );
+});
+
+Deno.test("publicState exposes each participant's status", () => {
+  const room = roomWith("Ana");
+  assertEquals(publicState(room, "p1").participants[0].status, "");
+  applyEvent(room, { type: "status", id: "p1", status: "thinking" });
+  assertEquals(publicState(room, "p1").participants[0].status, "thinking");
+});
+
+Deno.test("STATUSES presets and isAway: away/break/brb pause, thinking stays active", () => {
+  assertEquals(STATUSES.map((s) => s.id), ["away", "break", "brb", "thinking"]);
+  assertEquals(isAway("away"), true);
+  assertEquals(isAway("break"), true);
+  assertEquals(isAway("brb"), true);
+  assertEquals(isAway("thinking"), false, "present, not away");
+  assertEquals(isAway(""), false, "no status is not away");
+  assertEquals(isAway("bogus"), false, "unknown id is not away");
 });
 
 Deno.test("mergeRooms unions participants and resolves flags last-writer-wins", () => {

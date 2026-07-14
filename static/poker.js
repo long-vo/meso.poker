@@ -9,11 +9,13 @@ import {
   createRoom,
   DECK,
   generateRoomCode,
+  isAway,
   LIMITS,
   publicState,
   REACTIONS,
   sanitizeNotes,
   sanitizeWheelNames,
+  STATUSES,
 } from "./poker.mjs";
 
 /** Theme id -> colour. Theme CSS variables adapt to dark/light mode. */
@@ -24,6 +26,11 @@ const CARD_THEME_COLORS = {
   sunset: "var(--mask)",
   ruby: "var(--danger)",
 };
+
+/** Status id -> preset, so the badge renderer needn't scan STATUSES. */
+const STATUS_BY_ID = Object.fromEntries(STATUSES.map((s) => [s.id, s]));
+/** Picker options: "Available" (clear, id "") first, then every preset. */
+const STATUS_OPTIONS = [{ id: "", emoji: "🟢", label: "Available", away: false }, ...STATUSES];
 
 const $ = (id) => document.getElementById(id);
 
@@ -67,6 +74,8 @@ const els = {
   observerPanel: $("observer-panel"),
   observerNames: $("observer-names"),
   cardThemes: $("card-themes"),
+  statusPicker: $("status-picker"),
+  themesPanel: $("themes-panel"),
   reactions: $("reactions"),
   reactionLayer: $("reaction-layer"),
   notesList: $("notes-list"),
@@ -281,6 +290,8 @@ function createSolo(name, observer, onState) {
         ? { type: "notes-set", notes: message.notes, id: "you", at: Date.now() }
         : message.type === "theme"
         ? { type: "theme", id: "you", theme: message.theme }
+        : message.type === "status"
+        ? { type: "status", id: "you", status: message.status }
         : { type: message.type, at: Date.now() };
       if (applyEvent(room, event)) push();
     },
@@ -337,6 +348,48 @@ function buildThemePicker() {
     dot.classList.toggle("selected", theme === currentTheme());
     dot.addEventListener("click", () => setTheme(theme));
     els.cardThemes.appendChild(dot);
+  }
+}
+
+/* -------------------------------- status --------------------------------- */
+/* Your presence status (Away / Break / BRB / Thinking), set on yourself and
+   shown as a badge on everyone's card. Like the card theme: an owner-set
+   participant flag echoed through room state. Away statuses also pause the
+   round — see the active-voter tally in render(). */
+
+function setStatus(id) {
+  markSelectedStatus(id); // instant feedback; the room state echo confirms
+  session?.transport.send({ type: "status", status: id });
+}
+
+function markSelectedStatus(id) {
+  for (const btn of els.statusPicker.children) {
+    const on = btn.dataset.status === id;
+    btn.classList.toggle("selected", on);
+    btn.setAttribute("aria-checked", on ? "true" : "false");
+  }
+}
+
+function buildStatusPicker() {
+  els.statusPicker.innerHTML = "";
+  for (const opt of STATUS_OPTIONS) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "status-opt";
+    btn.dataset.status = opt.id;
+    btn.setAttribute("role", "radio");
+    btn.setAttribute("aria-checked", opt.id === "" ? "true" : "false");
+    // Labels come from our own STATUS_OPTIONS constant, so no escaping needed.
+    btn.innerHTML = `<span class="status-opt-emoji" aria-hidden="true">${opt.emoji}</span>` +
+      `<span class="status-opt-label">${opt.label}</span>`;
+    // Away-type statuses take you out of the round, so say so on their hint.
+    btn.title = opt.id === ""
+      ? "Clear your status"
+      : opt.away
+      ? `Set status: ${opt.label} — you won't be counted for estimation`
+      : `Set status: ${opt.label}`;
+    btn.addEventListener("click", () => setStatus(opt.id));
+    els.statusPicker.appendChild(btn);
   }
 }
 
@@ -588,15 +641,17 @@ function renderPlayers(state) {
   // grid nor on the wheel.
   for (const p of state.participants) {
     if (p.observer) continue;
+    const away = isAway(p.status);
     const wrap = document.createElement("div");
-    wrap.className = p.you ? "player me" : "player";
+    wrap.className = "player" + (p.you ? " me" : "") + (away ? " away" : "");
 
     const card = document.createElement("div");
     card.className = "pcard";
     card.dataset.name = p.name;
     card.style.setProperty("--card-accent", themeColor(p.theme));
     // A teammate who hasn't voted yet can be poked awake — click their card.
-    if (!state.revealed && !p.you && !p.voted) {
+    // An away player is sitting out, so they can't be nudged.
+    if (!state.revealed && !p.you && !p.voted && !away) {
       card.classList.add("nudgable");
       card.setAttribute("role", "button");
       card.setAttribute("tabindex", "0");
@@ -639,6 +694,17 @@ function renderPlayers(state) {
 
     wrap.appendChild(card);
     wrap.appendChild(label);
+    // Presence badge pinned to the card's top-right corner. It's a sibling of
+    // the card (not a child) so dimming an away card never fades the badge.
+    const preset = STATUS_BY_ID[p.status];
+    if (preset) {
+      const badge = document.createElement("span");
+      badge.className = "pcard-status" + (preset.away ? " away" : "");
+      badge.textContent = preset.emoji;
+      badge.title = preset.label;
+      badge.setAttribute("aria-label", `${p.name}: ${preset.label}`);
+      wrap.appendChild(badge);
+    }
     els.players.appendChild(wrap);
   }
 }
@@ -923,7 +989,13 @@ function render(state) {
   renderWheel(state);
   renderNotes(state);
 
-  const voters = state.participants.filter((p) => !p.observer);
+  const mine = state.participants.find((p) => p.you);
+  const observing = mine?.observer === true;
+  const iAmAway = isAway(mine?.status ?? "");
+
+  // "Active voters" excludes observers and anyone away: a stepped-out teammate
+  // shouldn't hold up the tally, the reveal gate, or the "waiting for you" nudge.
+  const voters = state.participants.filter((p) => !p.observer && !isAway(p.status));
   const voted = voters.filter((p) => p.voted).length;
   const total = voters.length;
   els.roundStatus.textContent = state.revealed ? "Revealed" : `${voted}/${total} voted`;
@@ -932,20 +1004,21 @@ function render(state) {
   els.reveal.disabled = state.revealed || voted === 0;
   els.reset.disabled = !state.revealed && voted === 0;
 
-  const mine = state.participants.find((p) => p.you);
-  // Observers have no deck: hide the cards and theme dots, show the note.
-  const observing = mine?.observer === true;
+  // Observers have no deck: hide the cards, status + theme pickers, show the note.
   els.deck.hidden = observing;
   els.deckFoot.hidden = observing;
+  els.themesPanel.hidden = observing;
   els.observerNote.hidden = !observing;
   markSelectedTheme(mine?.theme ?? currentTheme());
+  markSelectedStatus(mine?.status ?? "");
   for (const btn of els.deck.children) {
     btn.classList.toggle("selected", mine?.vote === btn.textContent);
     btn.disabled = state.revealed;
   }
 
-  // Nudge when everyone but you has voted and the round is still open.
-  const lastVoter = !state.revealed && !observing && total >= 2 &&
+  // Nudge when everyone but you has voted and the round is still open. If you're
+  // away or observing you aren't expected to vote, so you get no prompt.
+  const lastVoter = !state.revealed && !observing && !iAmAway && total >= 2 &&
     !mine?.voted && voted === total - 1;
   els.yourTurn.hidden = !lastVoter;
   document.querySelector(".deck-panel")?.classList.toggle("awaiting-you", lastVoter);
@@ -954,6 +1027,29 @@ function render(state) {
     nudgedThisRound = true;
     showToast("🃏 Everyone's in — pick your card");
   }
+
+  // Re-centre the theme dots on the "Your card" panel after this relayout.
+  alignThemeDots();
+}
+
+/* The theme-dot strip lives in its own table column, so it would naturally sit
+   at the column top (beside the players). Nudge it down so the dots are centred
+   on the "Your card" panel. Re-runs on any layout shift via the ResizeObserver
+   wired up at the bottom of this file. */
+function alignThemeDots() {
+  const deck = document.querySelector(".deck-panel");
+  // Skip when observing (picker hidden) or in the stacked ≤960px layout.
+  if (!deck || els.themesPanel.hidden || !matchMedia("(min-width: 961px)").matches) {
+    els.cardThemes.style.marginTop = "";
+    return;
+  }
+  // Point the strip's top at the deck's centre; the CSS translateY(-50%) then
+  // pulls it back by half its own height, so it stays centred whether it's
+  // collapsed to one dot or expanded to all five.
+  const themesTop = els.themesPanel.getBoundingClientRect().top;
+  const d = deck.getBoundingClientRect();
+  const offset = d.top + d.height / 2 - themesTop;
+  els.cardThemes.style.marginTop = `${Math.max(0, Math.round(offset))}px`;
 }
 
 /* ------------------------------ join / leave ----------------------------- */
@@ -1017,6 +1113,8 @@ function joinRoom(code) {
   els.roomChip.textContent = code;
   els.join.hidden = true;
   els.table.hidden = false;
+  // The table just became visible; align the theme dots once it has laid out.
+  requestAnimationFrame(alignThemeDots);
   history.replaceState(null, "", `?room=${code}`);
 }
 
@@ -1053,7 +1151,12 @@ function leaveRoom() {
 
 buildDeck();
 buildThemePicker();
+buildStatusPicker();
 buildReactions();
+
+// Re-centre the theme dots when the viewport changes; render() handles the
+// state-driven relayouts (players joining, results appearing, and so on).
+addEventListener("resize", alignThemeDots);
 
 els.joinBtn.addEventListener("click", () => joinRoom(els.roomCode.value));
 els.createBtn.addEventListener("click", () => joinRoom(generateRoomCode()));
