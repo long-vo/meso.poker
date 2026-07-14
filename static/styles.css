@@ -1,4 +1,5 @@
-/* meso.poker — theme + tool UI styles (shared origin: meso.utilities) */
+/* meso.poker — Scrum Poker UI styles (originally shared-origin with
+   meso.utilities; the hub + JSON-tool styles have been pruned — see UI-AUDIT.md) */
 
 :root {
   --bg: #0e1116;
@@ -17,15 +18,9 @@
   --danger: #f85149;
   --mask: #f0a35e;
   --player: #45c4b0;
-  --j-key: #79c0ff;
-  --j-str: #a5d6ff;
-  --j-num: #d2a8ff;
-  --j-bool: #ffa657;
-  --j-null: #ff7b72;
   --on-accent: #fff;
   --radius: 12px;
   --radius-sm: 8px;
-  --panel-max: 1040px;
   --shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
   --mono: ui-monospace, "SF Mono", "JetBrains Mono", "Fira Code", Menlo, Consolas, monospace;
   --sans: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
@@ -48,11 +43,6 @@
   --danger: #cf222e;
   --mask: #b8620f;
   --player: #0f8a7a;
-  --j-key: #0550ae;
-  --j-str: #0a7d55;
-  --j-num: #6639ba;
-  --j-bool: #953800;
-  --j-null: #cf222e;
   --shadow: 0 10px 28px rgba(20, 30, 50, 0.12);
 }
 
@@ -113,18 +103,9 @@ body {
   border-radius: 8px;
   display: block;
 }
-.brand-text {
-  display: flex;
-  flex-direction: column;
-  line-height: 1.1;
-}
 .brand-name {
   font-weight: 700;
   letter-spacing: 0.2px;
-}
-.brand-sub {
-  color: var(--text-dim);
-  font-size: 12.5px;
 }
 
 /* breadcrumb variant of the brand, used on tool pages */
@@ -166,10 +147,6 @@ body {
   border-radius: 999px;
   background: var(--bg-elev);
 }
-.pill-privacy {
-  color: var(--good);
-  border-color: color-mix(in srgb, var(--good) 40%, var(--border));
-}
 
 .icon-btn {
   border: 1px solid var(--border);
@@ -187,73 +164,8 @@ body {
   transform: translateY(-1px);
 }
 
-/* ---- hub (master page) ---- */
-.hub {
-  max-width: 980px;
-  margin: 0 auto;
-  padding: 40px clamp(16px, 4vw, 40px) 24px;
-}
-.hub-intro h1 {
-  margin: 0 0 6px;
-  font-size: 26px;
-  letter-spacing: 0.2px;
-}
-.hub-intro p {
-  margin: 0;
-  color: var(--text-dim);
-}
-
-.cards {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
-  gap: 18px;
-  margin-top: 28px;
-}
-
-.card {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  background: var(--bg-elev);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 20px;
-  box-shadow: var(--shadow);
-  text-decoration: none;
-  color: var(--text);
-  transition: border-color 0.15s, transform 0.15s;
-}
-a.card:hover {
-  border-color: var(--accent);
-  transform: translateY(-1px);
-}
-
-.card-head {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-.card-icon {
-  font-size: 22px;
-  filter: saturate(1.2);
-}
-.card-head h2 {
-  margin: 0;
-  font-size: 16.5px;
-}
-.card p {
-  margin: 0;
-  color: var(--text-dim);
-  font-size: 13.5px;
-  flex: 1;
-}
-
-.card-meta {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 6px;
-}
+/* Base chip for the estimate-distribution tags shown after reveal (.dist-chip
+   builds on it). Formerly shared with the hub's card meta tags. */
 .tag {
   font-family: var(--mono);
   font-size: 11.5px;
@@ -262,34 +174,6 @@ a.card:hover {
   border: 1px solid var(--border-strong);
   color: var(--text-dim);
   background: var(--bg-inset);
-}
-.card-go {
-  margin-left: auto;
-  color: var(--accent);
-  font-weight: 700;
-  font-size: 16px;
-  transition: transform 0.15s;
-}
-a.card:hover .card-go {
-  transform: translateX(3px);
-}
-
-.card.is-soon {
-  opacity: 0.68;
-  cursor: default;
-}
-.badge-soon {
-  margin-left: auto;
-  font-size: 10.5px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.4px;
-  color: var(--warn);
-  border: 1px solid color-mix(in srgb, var(--warn) 45%, var(--border));
-  background: color-mix(in srgb, var(--warn) 10%, transparent);
-  padding: 3px 8px;
-  border-radius: 999px;
-  white-space: nowrap;
 }
 
 /* ---- scrum poker ---- */
@@ -323,6 +207,19 @@ a.card:hover .card-go {
   flex-direction: column;
   gap: 18px;
   min-width: 0;
+}
+
+/* Cold-start banner: spans the full table width above the columns while the
+   initial WebSocket is still connecting (shown/hidden by poker.js). */
+.connect-hint {
+  grid-column: 1 / -1;
+  margin: 0;
+  padding: 10px 14px;
+  border: 1px solid color-mix(in srgb, var(--warn) 40%, var(--border));
+  background: color-mix(in srgb, var(--warn) 10%, transparent);
+  border-radius: var(--radius-sm);
+  color: var(--text-dim);
+  font-size: 13px;
 }
 
 .join-panel {
@@ -406,6 +303,11 @@ a.card:hover .card-go {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(104px, 1fr));
   gap: 14px;
+}
+/* Solo/empty state, rendered into the grid by renderPlayers — span the row. */
+.players-empty {
+  grid-column: 1 / -1;
+  margin: 0;
 }
 .player {
   position: relative;
@@ -1074,44 +976,12 @@ button.wheel-chip:hover .chip-x {
   color: var(--text-dim);
 }
 
-/* ---- layout ---- */
-.layout {
-  display: grid;
-  grid-template-columns: 320px minmax(0, 1fr);
-  grid-template-areas:
-    "controls editor"
-    "controls result";
-  gap: 18px;
-  padding: 22px clamp(16px, 4vw, 40px);
-  max-width: 1440px;
-  margin: 0 auto;
-  align-items: start;
-}
-
 .panel {
   background: var(--bg-elev);
   border: 1px solid var(--border);
   border-radius: var(--radius);
   padding: 18px;
   box-shadow: var(--shadow);
-}
-
-.controls {
-  grid-area: controls;
-  position: sticky;
-  top: 86px;
-}
-
-.editor {
-  grid-area: editor;
-  max-width: var(--panel-max);
-}
-
-/* Editor and results share the same width cap and sit on separate rows,
-   so wide output stays readable instead of stretching across the page. */
-.result {
-  grid-area: result;
-  max-width: var(--panel-max);
 }
 
 .panel-head {
@@ -1172,66 +1042,7 @@ button.wheel-chip:hover .chip-x {
   gap: 10px;
 }
 #invite {
-  color: mediumblue;
-}
-
-/* ---- mode switch ---- */
-.mode-switch {
-  display: flex;
-  gap: 4px;
-  padding: 4px;
-  margin-bottom: 18px;
-  background: var(--bg-inset);
-  border: 1px solid var(--border);
-  border-radius: 10px;
-}
-.mode-btn {
-  flex: 1;
-  border: 0;
-  background: transparent;
-  color: var(--text-dim);
-  padding: 8px 10px;
-  border-radius: 7px;
-  cursor: pointer;
-  font-size: 13.5px;
-  font-weight: 600;
-  transition: background 0.15s, color 0.15s;
-}
-.mode-btn:hover {
-  color: var(--text);
-}
-.mode-btn.is-active {
-  background: var(--accent);
-  color: var(--on-accent);
-}
-
-/* mode-scoped visibility */
-body[data-mode="json"] .only-log,
-body[data-mode="log"] .only-json {
-  display: none;
-}
-
-.mask-all {
-  font-size: 13.5px;
-  color: var(--text);
-  font-weight: 600;
-}
-
-.attach {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin-bottom: 10px;
-}
-.file-btn {
-  cursor: pointer;
-}
-.file-name {
-  font-size: 12px;
-  color: var(--text-faint);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  color: var(--accent);
 }
 
 input:disabled {
@@ -1274,6 +1085,20 @@ textarea:focus {
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 25%, transparent);
 }
 
+/* Keyboard focus ring for the custom-styled controls. :focus-visible (not
+   :focus) so it shows for keyboard/AT use but not on a mouse click; an outline
+   (not a box-shadow ring) so the players panel's overflow:hidden can't clip it.
+   Text inputs keep their own border + glow treatment above. */
+.deck-card:focus-visible,
+.reaction-btn:focus-visible,
+.theme-dot:focus-visible,
+.status-opt:focus-visible,
+.btn.spin-btn:focus-visible,
+.panel-toggle:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
 .hint {
   color: var(--text-faint);
   font-size: 12px;
@@ -1303,29 +1128,6 @@ textarea:focus {
   background: var(--bg-inset);
   transition: border-color 0.15s, color 0.15s, background 0.15s, opacity 0.15s;
 }
-.chip.matched {
-  color: var(--mask);
-  border-color: color-mix(in srgb, var(--mask) 55%, transparent);
-  background: color-mix(in srgb, var(--mask) 12%, transparent);
-}
-.chip.unused {
-  opacity: 0.55;
-}
-
-.keep-row {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-.keep-row input[type="range"] {
-  flex: 1;
-  accent-color: var(--accent);
-}
-.keep-row input[type="number"] {
-  width: 74px;
-  text-align: center;
-}
-
 /* ---- buttons ---- */
 .btn {
   border: 1px solid var(--border-strong);
@@ -1352,48 +1154,6 @@ textarea:focus {
   padding: 6px 11px;
   font-size: 12.5px;
 }
-.btn-row {
-  display: flex;
-  gap: 10px;
-}
-
-/* ---- editor + result ---- */
-.code-area {
-  min-height: 340px;
-  resize: vertical;
-  font-family: var(--mono);
-  font-size: 13px;
-  line-height: 1.6;
-  tab-size: 2;
-}
-.code-area.invalid {
-  border-color: var(--danger);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--danger) 22%, transparent);
-}
-
-.code-out {
-  margin: 0;
-  background: var(--bg-inset);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  padding: 14px 16px;
-  overflow: auto;
-  max-height: 460px;
-  min-height: 340px;
-}
-.code-out code {
-  font-family: var(--mono);
-  font-size: 13px;
-  line-height: 1.6;
-  white-space: pre;
-  color: var(--text);
-}
-
-.result-tools {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
 .switch {
   display: inline-flex;
   align-items: center;
@@ -1413,9 +1173,6 @@ textarea:focus {
 .status.ok {
   color: var(--good);
 }
-.status.bad {
-  color: var(--danger);
-}
 
 .error-line {
   color: var(--danger);
@@ -1423,59 +1180,6 @@ textarea:focus {
   margin: 8px 0 0;
   min-height: 1em;
   font-family: var(--mono);
-}
-
-.stats {
-  margin-top: 12px;
-  font-size: 12.5px;
-  color: var(--text-dim);
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px 16px;
-}
-.stats b {
-  color: var(--text);
-  font-variant-numeric: tabular-nums;
-}
-
-/* JSON syntax highlighting */
-.j-key {
-  color: var(--j-key);
-}
-.j-str {
-  color: var(--j-str);
-}
-.j-num {
-  color: var(--j-num);
-}
-.j-bool {
-  color: var(--j-bool);
-}
-.j-null {
-  color: var(--j-null);
-}
-.j-masked {
-  color: var(--mask);
-  font-weight: 600;
-}
-
-/* ---- API panel ---- */
-.api {
-  max-width: 1440px;
-  margin: 0 auto 8px;
-  margin-left: clamp(16px, 4vw, 40px);
-  margin-right: clamp(16px, 4vw, 40px);
-}
-.api summary {
-  cursor: pointer;
-  font-weight: 600;
-}
-.code-api {
-  margin-top: 12px;
-}
-.code-api code {
-  white-space: pre;
-  color: var(--text-dim);
 }
 
 .footer {
@@ -1508,22 +1212,6 @@ textarea:focus {
 }
 
 /* ---- responsive ---- */
-@media (max-width: 1080px) {
-  .layout {
-    grid-template-columns: 1fr;
-    grid-template-areas:
-      "controls"
-      "editor"
-      "result";
-  }
-  .controls {
-    position: static;
-  }
-  .editor,
-  .result {
-    max-width: none;
-  }
-}
 @media (max-width: 960px) {
   .poker > section[id="table"] {
     grid-template-columns: 1fr;
@@ -1545,12 +1233,6 @@ textarea:focus {
   .deck-card {
     width: 52px;
   }
-  .brand-sub {
-    display: none;
-  }
-  .pill-privacy span:last-child {
-    display: none;
-  }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -1567,7 +1249,6 @@ textarea:focus {
    glyphs show the gradient regardless of earlier `color` rules. */
 @supports (-webkit-background-clip: text) or (background-clip: text) {
   .brand-name,
-  .hub-intro h1,
   .join-panel h1,
   .panel-head h2,
   .room-label,

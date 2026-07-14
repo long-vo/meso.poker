@@ -36,6 +36,7 @@ const $ = (id) => document.getElementById(id);
 
 const els = {
   conn: $("conn"),
+  connectHint: $("connect-hint"),
   join: $("join"),
   joinError: $("join-error"),
   joinBtn: $("join-btn"),
@@ -114,11 +115,37 @@ function escapeHtml(s) {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
+/* The initial connect can take ~1 min while a free-tier host wakes from an
+   idle spin-down (see INITIAL_WINDOW_MS). The pill alone reads as "broken" to
+   first-timers, so while connecting we also show an in-view banner counting the
+   elapsed seconds. It holds off for 2s so a warm server never flashes it. */
+let connectHintTimer = 0;
+
+function startConnectHint() {
+  clearInterval(connectHintTimer);
+  const startAt = Date.now();
+  const tick = () => {
+    const secs = Math.floor((Date.now() - startAt) / 1000);
+    els.connectHint.hidden = secs < 2;
+    els.connectHint.textContent =
+      `⏳ Waking the room — a free-tier host can take up to a minute to start. (${secs}s)`;
+  };
+  tick();
+  connectHintTimer = setInterval(tick, 1000);
+}
+
+function stopConnectHint() {
+  clearInterval(connectHintTimer);
+  connectHintTimer = 0;
+  els.connectHint.hidden = true;
+}
+
 /** Update the connection pill: live | solo | connecting | reconnecting. */
 function setConn(state) {
   const pill = els.conn;
   if (!state) {
     pill.hidden = true;
+    stopConnectHint();
     return;
   }
   pill.hidden = false;
@@ -133,6 +160,9 @@ function setConn(state) {
   pill.title = state === "solo"
     ? "No server reachable — votes stay on this device. Run the Deno server for live rooms."
     : "";
+  // The banner tracks the initial connect only; reconnects keep the pill quiet.
+  if (state === "connecting") startConnectHint();
+  else stopConnectHint();
 }
 
 /* ------------------------------ transports ------------------------------ */
@@ -626,6 +656,7 @@ function buildDeck() {
     btn.className = "deck-card";
     btn.textContent = card;
     btn.setAttribute("role", "option");
+    btn.setAttribute("aria-selected", "false");
     btn.addEventListener("click", () => {
       if (!session || !lastState || lastState.revealed) return;
       const mine = lastState.participants.find((p) => p.you);
@@ -706,6 +737,18 @@ function renderPlayers(state) {
       wrap.appendChild(badge);
     }
     els.players.appendChild(wrap);
+  }
+
+  // Every other panel shows an empty state; give the core panel one too. When
+  // you're alone at the table, point at the invite control (top-left room bar).
+  const voterCount = state.participants.filter((p) => !p.observer).length;
+  if (voterCount <= 1) {
+    const empty = document.createElement("p");
+    empty.className = "hint players-empty";
+    empty.textContent = voterCount === 1
+      ? "You're the only one here — copy the invite link to bring your team in."
+      : "Nobody's at the table yet — copy the invite link to get started.";
+    els.players.appendChild(empty);
   }
 }
 
@@ -1012,7 +1055,9 @@ function render(state) {
   markSelectedTheme(mine?.theme ?? currentTheme());
   markSelectedStatus(mine?.status ?? "");
   for (const btn of els.deck.children) {
-    btn.classList.toggle("selected", mine?.vote === btn.textContent);
+    const chosen = mine?.vote === btn.textContent;
+    btn.classList.toggle("selected", chosen);
+    btn.setAttribute("aria-selected", chosen ? "true" : "false");
     btn.disabled = state.revealed;
   }
 

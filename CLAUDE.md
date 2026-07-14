@@ -60,8 +60,7 @@ validated against the reducer; invalid events are no-ops returning `false`.
 ## Front-end notes
 
 - `static/styles.css` is shared-origin with meso.utilities (the hub this project was split from); a
-  large portion is unused here. `UI-AUDIT.md` documents known styling debt and the proposed fixes —
-  consult it before restyling.
+  large portion is unused here.
 - Theme (dark/light) is `data-theme` on `<html>`, toggled by `static/theme.js`, persisted in
   localStorage. All colors come from CSS custom properties in `:root` / `[data-theme="light"]`.
 - Per-player card themes flow as ids (`CARD_THEMES` in poker.mjs) through room state; the client

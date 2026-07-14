@@ -4,7 +4,7 @@
   "exports": "./main.ts",
   "tasks": {
     "start": "deno run --allow-net --allow-read --allow-env main.ts",
-    "dev": "deno run --allow-net --allow-read --allow-env --watch main.ts",
+    "dev": "PORT=8001 deno run --allow-net --allow-read --allow-env --watch main.ts",
     "test": "deno test --allow-read",
     "check": "deno check main.ts src/poker.test.ts",
     "fmt": "deno fmt",
