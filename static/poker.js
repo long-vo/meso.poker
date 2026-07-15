@@ -98,9 +98,10 @@ let lastSpunAt = 0;
 let wheelNamesKey = "";
 let firstWheelState = true;
 /* Auto-shuffle is a local preference: only the client that spins reshuffles
-   the order once its spin lands, so the room never gets competing reorders. */
+   the order, and it does so at the start of its next spin (not on landing, which
+   would snap the wheel off the winner), so the room never gets competing
+   reorders and the last result stays parked until someone spins again. */
 let autoShuffle = false;
-let shuffleAfterSpin = false;
 
 /* ------------------------------- helpers -------------------------------- */
 
@@ -883,12 +884,15 @@ function buildWheelSvg(names) {
       );
     }
     const label = name.length > 12 ? name.slice(0, 11) + "…" : name;
-    const size = names.length <= 8 ? 11 : names.length <= 14 ? 9 : 7.5;
+    const size = names.length <= 14 ? 9 : 7.5;
     const mid = (i + 0.5) * per;
     parts.push(
-      `<text x="100" y="46" text-anchor="middle" font-size="${size}" class="wheel-label" ` +
+      `<text x="100" y="46" text-anchor="middle" dominant-baseline="central" ` +
+        `font-size="${size}" class="wheel-label" ` +
         `style="fill:${wheelLabelColor(i, names.length)}" ` +
-        `transform="rotate(${mid.toFixed(2)} 100 100)">${escapeHtml(label)}</text>`,
+        `transform="rotate(${mid.toFixed(2)} 100 100) rotate(90 100 46)">${
+          escapeHtml(label)
+        }</text>`,
     );
   });
   els.wheel.innerHTML = `<g id="wheel-g" class="wheel-g">${parts.join("")}</g>` +
@@ -963,11 +967,6 @@ function animateWheelTo(winner, names) {
     wheelSpinning = false;
     group.classList.remove("spinning");
     showWinner(winner, true);
-    // Auto-shuffle: reorder for the next spin once this one has landed.
-    if (shuffleAfterSpin) {
-      shuffleAfterSpin = false;
-      session?.transport.send({ type: "wheel-set", names: shuffled(names) });
-    }
     if (lastState) render(lastState);
   }, 4300);
 }
@@ -1175,7 +1174,6 @@ function leaveRoom() {
   lastSpunAt = 0;
   wheelNamesKey = "";
   firstWheelState = true;
-  shuffleAfterSpin = false;
   els.wheelResult.hidden = true;
   hidePickPanel();
   observerKey = "";
@@ -1324,15 +1322,18 @@ els.noteDate.value = todayStr();
 
 els.spin.addEventListener("click", () => {
   if (!session || !lastState || wheelSpinning) return;
-  const names = wheelNamesOf(lastState);
+  let names = wheelNamesOf(lastState);
   if (names.length < 2) return;
-  // Freeze the derived list first so the spin validates against it and every
-  // client animates over the exact same segments.
-  if (!lastState.wheel.custom) {
+  // Auto-shuffle reorders here, at the start of the spin, so the previous
+  // result stayed parked on the wheel until now.
+  if (autoShuffle) names = shuffled(names);
+  // Freeze the list so the spin validates against it and every client animates
+  // over the exact same segments. A shuffle always needs pushing; an unshuffled
+  // derived list only needs freezing when it isn't already custom.
+  if (autoShuffle || !lastState.wheel.custom) {
     session.transport.send({ type: "wheel-set", names });
   }
   const winner = names[Math.floor(Math.random() * names.length)];
-  shuffleAfterSpin = autoShuffle;
   session.transport.send({ type: "wheel-spin", winner });
 });
 

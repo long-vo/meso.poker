@@ -87,10 +87,10 @@ const RELAY_WINDOW_MS = 2_000;
 const RELAY_MAX_PER_WINDOW = 6;
 const REMOTE_TTL_MS = 75_000;
 const HEARTBEAT_MS = 30_000;
-// Clients ping every 25s; a socket silent for 60s+ has missed two pings and
-// is presumed dead (closed tab, sleep, dropped network) — close it so the
-// player leaves the room promptly instead of lingering until TCP notices.
-const CLIENT_TIMEOUT_MS = 60_000;
+// Clients ping every 25s; a socket silent for 15 min has missed dozens of pings
+// and is presumed dead (closed tab, sleep, dropped network) — close it so the
+// player eventually leaves the room instead of lingering until TCP notices.
+const CLIENT_TIMEOUT_MS = 15 * 60_000;
 const EMPTY_ROOM_TTL_MS = 5 * 60_000;
 
 const isolateId = crypto.randomUUID();
