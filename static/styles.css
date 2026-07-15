@@ -14,7 +14,7 @@
   --accent-2: #7c5cff;
   --good: #3fb950;
   --warn: #d29922;
-  --on-warn: #1a1204;
+  --on-warn: #fff;
   --danger: #f85149;
   --mask: #f0a35e;
   --player: #45c4b0;
@@ -430,18 +430,28 @@ body {
 
 /* Always in the flow with a reserved height, so revealing / starting a new
    round never changes the panel height. Chips stay on one scrollable row for
-   the same reason: a wide vote spread must not wrap into a second line. */
-.results {
+   the same reason: a wide vote spread must not wrap into a second line. The
+   row shares its line with the reaction buttons (results left, reactions
+   right); `min-width: 0` lets the chip strip scroll instead of pushing the
+   buttons out of the panel. */
+.results-row {
   margin-top: 16px;
   padding-top: 14px;
   border-top: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 48px;
+}
+.results {
+  flex: 1;
+  min-width: 0;
   display: flex;
   flex-wrap: nowrap;
   overflow-x: auto;
   align-items: center;
   gap: 10px 16px;
   font-size: 13.5px;
-  min-height: 48px;
 }
 .results .hint {
   margin: 0;
@@ -468,8 +478,8 @@ body {
   background: color-mix(in srgb, currentColor 15%, transparent);
 }
 /* The most-chosen card(s) after reveal: a solid gold "winner" fill. Ties share
-   it. `--on-warn` flips the text (dark on gold in dark theme, white on the
-   deeper gold in light); the count pill re-tints from `currentColor` to match. */
+   it. `--on-warn` keeps the text white on the gold in both themes; the count
+   pill re-tints from `currentColor` to match. */
 .dist-chip--top {
   border-color: var(--warn);
   background: var(--warn);
@@ -1273,9 +1283,11 @@ textarea:focus {
 .players-panel .panel-head {
   flex-wrap: wrap;
 }
+/* the reaction buttons ride the results row, hugging the right edge */
 .reactions {
   display: flex;
   gap: 6px;
+  flex-shrink: 0;
 }
 .reaction-btn {
   width: 34px;
@@ -1295,6 +1307,31 @@ textarea:focus {
 }
 .reaction-btn:active {
   transform: scale(0.94);
+}
+
+/* bell: opt-in system notifications for nudges that land in a hidden tab */
+.notify-toggle {
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border-radius: 999px;
+  border: 1px solid var(--border-strong);
+  background: var(--bg-inset);
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0.55;
+  transition: transform 0.15s, border-color 0.15s, opacity 0.15s;
+}
+.notify-toggle:hover,
+.notify-toggle:focus-visible {
+  transform: translateY(-2px);
+  opacity: 1;
+  border-color: var(--accent);
+}
+.notify-toggle[aria-pressed="true"] {
+  opacity: 1;
+  border-color: var(--accent);
 }
 
 .reaction-layer {

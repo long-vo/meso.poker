@@ -122,11 +122,16 @@
         <div class="panel-head">
           <h2>Players</h2>
           <span id="round-status" class="status"></span>
+          <button id="nudge-notify" class="notify-toggle" type="button" aria-pressed="false" hidden
+            title="Notify me when I'm nudged in a background tab"
+            aria-label="Notify me when I'm nudged in a background tab">🔕</button>
+        </div>
+        <div id="players" class="players"></div>
+        <div class="results-row">
+          <div id="results" class="results"></div>
           <div id="reactions" class="reactions" role="group" aria-label="Send a reaction"
             title="Everyone in the room sees your reaction"></div>
         </div>
-        <div id="players" class="players"></div>
-        <div id="results" class="results"></div>
         <div id="reaction-layer" class="reaction-layer" aria-hidden="true"></div>
       </div>
 

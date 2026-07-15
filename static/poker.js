@@ -79,6 +79,7 @@ const els = {
   themesPanel: $("themes-panel"),
   reactions: $("reactions"),
   reactionLayer: $("reaction-layer"),
+  nudgeNotify: $("nudge-notify"),
   notesList: $("notes-list"),
   notesStatus: $("notes-status"),
   noteDate: $("note-date"),
@@ -510,10 +511,148 @@ function onNudge(target, from) {
   const mine = lastState?.participants.find((p) => p.you);
   if (mine?.name === target) {
     showToast(`👉 ${from} nudged you — pick a card!`);
-    navigator.vibrate?.(200);
+    navigator.vibrate?.([200, 100, 200, 100, 400]);
+    // A hidden tab shows neither the wiggle nor the toast, so escalate: flash
+    // the tab title and, when the bell is switched on, raise a system
+    // notification (see the section below).
+    if (document.hidden) {
+      startTitleFlash();
+      showNudgeNotification(from);
+    }
   } else if (mine?.name === from) {
     showToast(`You nudged ${target}`);
   }
+}
+
+/* ---------------------- background-tab nudge alerts ---------------------- */
+/* A nudge that lands while this tab is hidden would go unseen: the tab title
+   flashes until the player returns (needs no permission), and — once the bell
+   in the players panel is switched on — a system notification fires too.
+   Alerts clear as soon as the tab is visible again, the vote is cast, the
+   player steps away, or the round resolves (see render and the
+   visibilitychange listener). Solo mode never relays nudges, so none of this
+   runs there. */
+
+const NOTIFY_PREF_KEY = "meso-poker-notify";
+const NUDGE_TAG = "meso-poker-nudge";
+const baseTitle = document.title;
+let titleFlashTimer = 0;
+/** The page-scoped notification, kept so refocusing the tab can close it. */
+let nudgeNotification = null;
+
+function startTitleFlash() {
+  clearInterval(titleFlashTimer);
+  let flip = true;
+  const tick = () => {
+    document.title = flip ? "👉 Pick a card!" : baseTitle;
+    flip = !flip;
+  };
+  tick();
+  // Chrome throttles hidden-tab timers to ~1/min after 5 idle minutes; the
+  // title keeps alternating then, just slower — still a visible reminder.
+  titleFlashTimer = setInterval(tick, 1000);
+}
+
+function clearNudgeAlerts() {
+  if (!titleFlashTimer && !nudgeNotification) return;
+  clearInterval(titleFlashTimer);
+  titleFlashTimer = 0;
+  document.title = baseTitle;
+  nudgeNotification?.close();
+  nudgeNotification = null;
+  // Sweep service-worker notifications too (the Android path below).
+  navigator.serviceWorker?.getRegistration()
+    .then((reg) => reg?.getNotifications({ tag: NUDGE_TAG }))
+    .then((ns) => ns?.forEach((n) => n.close()))
+    .catch(() => {});
+}
+
+function notifyEnabled() {
+  try {
+    return "Notification" in globalThis && Notification.permission === "granted" &&
+      localStorage.getItem(NOTIFY_PREF_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function showNudgeNotification(from) {
+  if (!notifyEnabled()) return;
+  const title = `👉 ${from} nudged you`;
+  const options = { body: "Everyone's waiting — pick a card", tag: NUDGE_TAG, renotify: true };
+  try {
+    const n = new Notification(title, options);
+    n.onclick = () => {
+      globalThis.focus();
+      n.close();
+    };
+    nudgeNotification = n;
+  } catch {
+    // Android Chrome forbids page-scoped notifications: post through the
+    // service worker instead (sw.js focuses the tab on click).
+    navigator.serviceWorker?.getRegistration()
+      .then((reg) => reg?.showNotification(title, options))
+      .catch(() => {});
+  }
+}
+
+function setNotifyPref(on) {
+  try {
+    localStorage.setItem(NOTIFY_PREF_KEY, on ? "1" : "");
+  } catch {
+    /* fine */
+  }
+}
+
+function reflectNotifyToggle() {
+  const on = notifyEnabled();
+  els.nudgeNotify.textContent = on ? "🔔" : "🔕";
+  els.nudgeNotify.setAttribute("aria-pressed", on ? "true" : "false");
+  const label = on
+    ? `Nudge notifications on — click to turn off. ${notifySetupHint()}`
+    : "Notify me when I'm nudged in a background tab";
+  els.nudgeNotify.title = label;
+  els.nudgeNotify.setAttribute("aria-label", label);
+}
+
+/* macOS is the platform that needs setup guidance: Chrome hands the banner
+   to the system, and macOS often ships with Chrome notifications off (or on
+   the auto-dismissing "Banners" style). The sentence rides on the bell's
+   tooltip rather than taking up panel space. */
+function notifySetupHint() {
+  const mac = /Mac/.test(navigator.platform ?? "");
+  return mac
+    ? "macOS shows the banner, so allow Chrome under System Settings → " +
+      "Notifications and pick the “Alerts” style to keep a nudge on screen."
+    : "If no banner appears, allow browser notifications in your system settings.";
+}
+
+async function toggleNudgeNotifications() {
+  if (notifyEnabled()) {
+    setNotifyPref(false);
+    showToast("Nudge notifications off");
+  } else {
+    // Chrome only shows the permission prompt on a user gesture — this click.
+    // An earlier "block" can't be re-asked; it must be undone in site settings.
+    const perm = Notification.permission === "default"
+      ? await Notification.requestPermission()
+      : Notification.permission;
+    if (perm === "granted") {
+      setNotifyPref(true);
+      // The worker exists only for Android's notification path; it has no
+      // fetch handler, so nothing is intercepted or cached (see sw.js).
+      navigator.serviceWorker?.register("sw.js").catch(() => {});
+      showToast("You'll get a notification when nudged");
+    } else {
+      setNotifyPref(false);
+      showToast(
+        perm === "denied"
+          ? "Notifications are blocked in the browser's site settings"
+          : "Notifications stay off",
+      );
+    }
+  }
+  reflectNotifyToggle();
 }
 
 /* -------------------------------- room notes ------------------------------ */
@@ -1072,6 +1211,12 @@ function render(state) {
     showToast("🃏 Everyone's in — pick your card");
   }
 
+  // A background-tab nudge alert is moot once you've voted, stepped away, or
+  // the round resolved — sweep it even while the tab stays hidden.
+  if (state.revealed || mine?.voted || observing || iAmAway) {
+    clearNudgeAlerts();
+  }
+
   // Re-centre the theme dots on the "Your card" panel after this relayout.
   alignThemeDots();
 }
@@ -1182,6 +1327,7 @@ function leaveRoom() {
   document.body.classList.remove("has-observers");
   els.reactionLayer.innerHTML = "";
   nudgedAt.clear();
+  clearNudgeAlerts();
   notesSeedChecked = false;
   lastNotesAt = -1;
   els.noteText.value = "";
@@ -1196,6 +1342,17 @@ buildDeck();
 buildThemePicker();
 buildStatusPicker();
 buildReactions();
+
+// Background-tab nudge alerts: the bell only appears when the browser can
+// show notifications at all; the title flash needs no setup and always runs.
+if ("Notification" in globalThis) {
+  els.nudgeNotify.hidden = false;
+  els.nudgeNotify.addEventListener("click", toggleNudgeNotifications);
+  reflectNotifyToggle();
+}
+addEventListener("visibilitychange", () => {
+  if (!document.hidden) clearNudgeAlerts();
+});
 
 // Re-centre the theme dots when the viewport changes; render() handles the
 // state-driven relayouts (players joining, results appearing, and so on).
