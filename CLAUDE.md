@@ -54,8 +54,10 @@ local dev) the channel is quiet and everything still works — don't break this 
 Wire protocol is documented at the top of `poker-server.ts`.
 
 **Server events vs. client events.** Clients never send `join` — the server synthesizes it from the
-WS query params (`/api/poker/ws?room=CODE&name=NAME`). Client messages are size-capped (4 KB) and
-validated against the reducer; invalid events are no-ops returning `false`.
+WS query params (`/api/poker/ws?room=CODE&name=NAME`, plus optional `theme`, `observer`, `pin`).
+Client messages are size-capped (4 KB) and validated against the reducer; invalid events are no-ops
+returning `false`. The optional 4-digit room `pin` is set by the first joiner and required of the
+rest; it lives on room state, is gossiped between isolates, but is never exposed by `publicState`.
 
 ## Front-end notes
 

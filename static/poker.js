@@ -14,6 +14,7 @@ import {
   publicState,
   REACTIONS,
   sanitizeNotes,
+  sanitizePin,
   sanitizeWheelNames,
   STATUSES,
 } from "./poker.mjs";
@@ -43,6 +44,7 @@ const els = {
   joinBtn: $("join-btn"),
   createBtn: $("create-btn"),
   playerName: $("player-name"),
+  roomPin: $("room-pin"),
   observerCheck: $("observer-check"),
   observerNote: $("observer-note"),
   deckFoot: $("deck-foot"),
@@ -89,7 +91,7 @@ const els = {
 };
 
 /** Current session: null until joined. */
-let session = null; // { code, name, transport }
+let session = null; // { code, name, pin, transport }
 let lastState = null;
 
 /* wheel animation state (client-side; the spinner picks the winner and the
@@ -184,7 +186,7 @@ const INITIAL_WINDOW_MS = 90_000; // Render free tier can take 30–60s to wake
 // and doesn't spin down mid-game (Render idles out after ~15 min without it;
 // WebSocket frames alone may not count). Runs only while a room is open.
 const KEEP_ALIVE_MS = 5 * 60_000;
-function connectLive(code, name, observer, handlers) {
+function connectLive(code, name, observer, pin, handlers) {
   let socket = null;
   let everOpened = false;
   let closedByUs = false;
@@ -199,7 +201,8 @@ function connectLive(code, name, observer, handlers) {
     socket = new WebSocket(
       `${proto}://${location.host}/api/poker/ws?room=${code}` +
         `&name=${encodeURIComponent(name)}&theme=${encodeURIComponent(currentTheme())}` +
-        (observer ? "&observer=1" : ""),
+        (observer ? "&observer=1" : "") +
+        (pin ? `&pin=${encodeURIComponent(pin)}` : ""),
     );
     socket.onopen = () => {
       everOpened = true;
@@ -220,7 +223,7 @@ function connectLive(code, name, observer, handlers) {
         return;
       }
       if (msg.type === "state") handlers.state(msg.state);
-      else if (msg.type === "error") handlers.error(msg.message);
+      else if (msg.type === "error") handlers.error(msg.message, msg.reason);
       else if (msg.type === "react") handlers.react(msg);
       else if (msg.type === "nudge") handlers.nudge(msg);
     };
@@ -288,7 +291,7 @@ function connectLive(code, name, observer, handlers) {
 }
 
 /** Solo transport: a local one-person room, same reducer as the server. */
-function createSolo(name, observer, onState) {
+function createSolo(name, observer, pin, onState) {
   const room = createRoom();
   applyEvent(room, {
     type: "join",
@@ -296,6 +299,9 @@ function createSolo(name, observer, onState) {
     name,
     theme: currentTheme(),
     observer,
+    // Inert in solo mode (nobody else can join), but keeps the local room's
+    // state consistent with a live room created the same way.
+    password: pin,
     at: Date.now(),
   });
   const push = () => onState(publicState(room, "you"));
@@ -1244,7 +1250,44 @@ function alignThemeDots() {
 
 /* ------------------------------ join / leave ----------------------------- */
 
-function joinRoom(code) {
+/* A room's PIN is remembered per code in localStorage so returning to a
+   protected room (a reload, or clicking the invite link again) rejoins without
+   re-typing it. It's saved once a join succeeds and cleared when the room turns
+   it away as wrong — so a recreated room with a new PIN self-heals. Same threat
+   model as the room notes stored alongside it: a casual gate on your own device. */
+const pinKey = (code) => `meso-poker-pin-${code}`;
+
+function rememberPin(code, pin) {
+  try {
+    if (pin) localStorage.setItem(pinKey(code), pin);
+    else localStorage.removeItem(pinKey(code));
+  } catch {
+    /* storage blocked — the PIN still lives in the session for reconnects */
+  }
+}
+
+function recallPin(code) {
+  try {
+    return sanitizePin(localStorage.getItem(pinKey(code)));
+  } catch {
+    return "";
+  }
+}
+
+function forgetPin(code) {
+  try {
+    localStorage.removeItem(pinKey(code));
+  } catch {
+    /* fine */
+  }
+}
+
+/**
+ * Join (or create) a room. `pinArg` is the PIN to use — a 4-digit string, ""
+ * for none, or undefined to read it from the PIN field. It means "set this PIN"
+ * on the create path and "supply this PIN" on the join path.
+ */
+function joinRoom(code, pinArg) {
   const name = els.playerName.value.trim();
   if (!name) {
     els.joinError.textContent = "Please enter your name first.";
@@ -1257,8 +1300,19 @@ function joinRoom(code) {
     els.roomCode.focus();
     return;
   }
+  const pin = pinArg !== undefined ? sanitizePin(pinArg) : sanitizePin(els.roomPin.value);
+  // A partial entry (1–3 digits) typed into the field is a mistake worth
+  // catching; an empty field means "no PIN". A PIN from storage is trusted.
+  if (pinArg === undefined && els.roomPin.value.trim() && !pin) {
+    els.joinError.textContent = "A PIN must be exactly 4 digits.";
+    els.roomPin.focus();
+    return;
+  }
   els.joinError.textContent = "";
   const observer = els.observerCheck.checked;
+  // Save the PIN only once the room actually accepts us (first state frame), so
+  // a wrong PIN is never cached; reset per join.
+  let pinSaved = false;
   // Remember the name and the observer role so a reload (auto-join below)
   // rejoins the same way — a PO shouldn't silently turn into a voter.
   try {
@@ -1269,8 +1323,15 @@ function joinRoom(code) {
   }
 
   setConn("connecting");
-  const transport = connectLive(code, name, observer, {
-    state: render,
+  const transport = connectLive(code, name, observer, pin, {
+    state: (state) => {
+      // The room accepted us — this PIN is good, so keep it for next time.
+      if (!pinSaved) {
+        pinSaved = true;
+        rememberPin(code, pin);
+      }
+      render(state);
+    },
     react: (msg) => floatReaction(String(msg.emoji ?? ""), String(msg.name ?? "")),
     nudge: (msg) => onNudge(String(msg.name ?? ""), String(msg.from ?? "")),
     up: () => setConn("live"),
@@ -1283,20 +1344,31 @@ function joinRoom(code) {
       // more re-seed check so the saved notes come back.
       notesSeedChecked = false;
     },
-    error: (message) => {
+    error: (message, reason) => {
+      // A protected room turned us away: send the user back to the join form
+      // to enter the PIN (never fall through to solo mode). Closing the
+      // transport via leaveRoom also stops the reconnect loop.
+      if (reason === "pin") {
+        forgetPin(code); // the PIN we tried was wrong or missing
+        leaveRoom();
+        els.roomCode.value = code;
+        els.joinError.textContent = "This room needs its 4-digit PIN. Ask a teammate for it.";
+        els.roomPin.focus();
+        return;
+      }
       showToast(message || "The room turned you away.");
       leaveRoom();
     },
     fail: () => {
       // No server (static build or server down): same table, local room.
       if (!session) return;
-      session.transport = createSolo(name, observer, render);
+      session.transport = createSolo(name, observer, pin, render);
       setConn("solo");
       showToast("No server reachable — solo mode");
     },
   });
 
-  session = { code, name, transport };
+  session = { code, name, pin, transport };
   notesSeedChecked = false;
   lastNotesAt = -1;
   els.noteDate.value = todayStr();
@@ -1332,6 +1404,8 @@ function leaveRoom() {
   notesSeedChecked = false;
   lastNotesAt = -1;
   els.noteText.value = "";
+  // The PIN is per-room; clear the field so it never carries to the next join.
+  els.roomPin.value = "";
   setConn(null);
   history.replaceState(null, "", location.pathname);
   els.roomCode.focus();
@@ -1361,7 +1435,11 @@ addEventListener("resize", alignThemeDots);
 
 els.joinBtn.addEventListener("click", () => joinRoom(els.roomCode.value));
 els.createBtn.addEventListener("click", () => joinRoom(generateRoomCode()));
-for (const input of [els.playerName, els.roomCode]) {
+// Keep the PIN field to digits only, at most four.
+els.roomPin.addEventListener("input", () => {
+  els.roomPin.value = els.roomPin.value.replace(/\D/g, "").slice(0, LIMITS.pin);
+});
+for (const input of [els.playerName, els.roomCode, els.roomPin]) {
   input.addEventListener("keydown", (e) => {
     if (e.key === "Enter") joinRoom(els.roomCode.value || generateRoomCode());
   });
@@ -1520,8 +1598,11 @@ try {
 }
 const invited = (new URLSearchParams(location.search).get("room") ?? "").toUpperCase();
 if (invited) els.roomCode.value = invited;
+// Prefill the PIN a returning visitor saved for this room (reconnect convenience).
+const savedPin = invited ? recallPin(invited) : "";
+if (savedPin) els.roomPin.value = savedPin;
 if (invited && CODE_PATTERN.test(invited) && els.playerName.value) {
-  joinRoom(invited);
+  joinRoom(invited, savedPin);
 } else if (!els.playerName.value) {
   els.playerName.focus();
 } else {

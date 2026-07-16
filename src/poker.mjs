@@ -29,6 +29,7 @@ export const LIMITS = {
   wheelNames: 30,
   note: 280,
   notes: 50,
+  pin: 4,
 };
 
 /**
@@ -79,6 +80,7 @@ export function isAway(status) {
  *   wheelSpunAt: number,
  *   notes: Note[],
  *   notesAt: number,
+ *   password: string | null,
  * }} Room
  * @typedef {{
  *   type: string,
@@ -92,6 +94,7 @@ export function isAway(status) {
  *   observer?: boolean,
  *   status?: string,
  *   notes?: unknown[],
+ *   password?: string,
  *   at?: number,
  * }} RoomEvent
  */
@@ -110,6 +113,10 @@ export function createRoom() {
     wheelSpunAt: 0,
     notes: [],
     notesAt: 0,
+    // null = never initialised (the first joiner will set it); "" = an open
+    // room; a 4-digit string = the PIN a joiner must supply. Never sent to
+    // clients — `publicState` omits it — so it only travels server-to-server.
+    password: null,
   };
 }
 
@@ -163,6 +170,21 @@ export function sanitizeNotes(raw) {
   return notes;
 }
 
+/** Shape of a room PIN: exactly four digits (shared by server and UI). */
+export const PIN_PATTERN = /^\d{4}$/;
+
+/**
+ * Normalize a room PIN: keep it only when it is exactly four digits, else "".
+ * Shared by the reducer's join gate, the server pre-check and the client so all
+ * three agree on what counts as a PIN (blank means "no PIN / open room").
+ * @param {unknown} raw
+ * @returns {string}
+ */
+export function sanitizePin(raw) {
+  const pin = String(raw ?? "");
+  return PIN_PATTERN.test(pin) ? pin : "";
+}
+
 /**
  * Numeric value of a card, or null when it has none ("?" and "☕").
  * @param {string} card
@@ -189,6 +211,16 @@ export function applyEvent(room, event) {
       const name = String(event.name ?? "").trim().slice(0, LIMITS.name);
       if (!id || !name || room.participants[id]) return false;
       if (Object.keys(room.participants).length >= LIMITS.participants) return false;
+      // Password gate. A room's PIN is fixed by whoever initialises it: an
+      // uninitialised room (password null) adopts this join's PIN — "" when the
+      // creator set none, leaving the room open — and locks it in. Every later
+      // join to a protected room must supply the matching PIN.
+      const pin = sanitizePin(event.password);
+      if (room.password === null) {
+        room.password = pin;
+      } else if (room.password && pin !== room.password) {
+        return false;
+      }
       const theme = CARD_THEMES.includes(String(event.theme))
         ? String(event.theme)
         : CARD_THEMES[0];
@@ -403,9 +435,15 @@ export function mergeRooms(local, remotes) {
     wheelSpunAt: local.wheelSpunAt,
     notes: local.notes.map((note) => ({ ...note })),
     notesAt: local.notesAt,
+    password: local.password,
   };
   for (const remote of remotes) {
     Object.assign(merged.participants, remote.participants);
+    // Adopt a sibling's PIN when this isolate hasn't been initialised yet, so a
+    // joiner landing on a fresh isolate is still gated by the creator's PIN.
+    if (merged.password === null && remote.password !== null) {
+      merged.password = remote.password;
+    }
     if (remote.revealedAt > merged.revealedAt) {
       merged.revealed = remote.revealed;
       merged.revealedAt = remote.revealedAt;

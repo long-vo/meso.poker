@@ -17,6 +17,7 @@ import {
   mergeRooms,
   publicState,
   sanitizeNotes,
+  sanitizePin,
   sanitizeWheelNames,
   STATUSES,
 } from "./poker.mjs";
@@ -53,6 +54,65 @@ Deno.test("join truncates long names and enforces the participant cap", () => {
     applyEvent(room, { type: "join", id: `p${i}`, name: `P${i}` });
   }
   assertEquals(Object.keys(room.participants).length, LIMITS.participants);
+});
+
+Deno.test("sanitizePin keeps exactly four digits, else empty", () => {
+  assertEquals(sanitizePin("4281"), "4281");
+  assertEquals(sanitizePin("0000"), "0000", "leading zeros kept");
+  assertEquals(sanitizePin("428"), "", "too short");
+  assertEquals(sanitizePin("42813"), "", "too long");
+  assertEquals(sanitizePin("42a1"), "", "non-digit");
+  assertEquals(sanitizePin(""), "");
+  assertEquals(sanitizePin(undefined), "");
+});
+
+Deno.test("room PIN: the first join sets it and later joins must match", () => {
+  const room = createRoom();
+  assertEquals(room.password, null, "uninitialised until the first join");
+  assertEquals(
+    applyEvent(room, { type: "join", id: "a", name: "Ana", password: "4281", at: 1 }),
+    true,
+  );
+  assertEquals(room.password, "4281", "first joiner locks in the PIN");
+  assertEquals(
+    applyEvent(room, { type: "join", id: "b", name: "Ben", password: "0000", at: 2 }),
+    false,
+    "wrong PIN is turned away",
+  );
+  assertEquals(
+    applyEvent(room, { type: "join", id: "b", name: "Ben", password: "4281", at: 3 }),
+    true,
+    "matching PIN gets in",
+  );
+  // The PIN is server-only: it never appears in the per-viewer projection.
+  assertEquals("password" in publicState(room, "a"), false);
+});
+
+Deno.test("room PIN: an open room stays open and later PINs cannot lock it", () => {
+  const room = createRoom();
+  applyEvent(room, { type: "join", id: "a", name: "Ana", at: 1 }); // no PIN -> open
+  assertEquals(room.password, "", "open room");
+  assertEquals(
+    applyEvent(room, { type: "join", id: "b", name: "Ben", password: "9999", at: 2 }),
+    true,
+    "a later PIN is ignored, join still succeeds",
+  );
+  assertEquals(room.password, "", "still open — no PIN was set");
+});
+
+Deno.test("room PIN: a non-four-digit PIN on the first join leaves the room open", () => {
+  const room = createRoom();
+  applyEvent(room, { type: "join", id: "a", name: "Ana", password: "12", at: 1 });
+  assertEquals(room.password, "", "junk PIN sanitises to open");
+});
+
+Deno.test("mergeRooms adopts a room PIN from a sibling isolate", () => {
+  const a = createRoom(); // uninitialised on this isolate
+  const b = createRoom();
+  applyEvent(b, { type: "join", id: "q1", name: "Ben", password: "4281", at: 5 });
+  const merged = mergeRooms(a, [b]);
+  assertEquals(merged.password, "4281", "the sibling's PIN is adopted");
+  assertEquals(a.password, null, "inputs are not modified");
 });
 
 Deno.test("vote accepts deck cards only, toggles with null, locks after reveal", () => {

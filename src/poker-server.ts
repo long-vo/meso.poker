@@ -19,7 +19,10 @@
  *                     { type: "react", emoji }    emoji: a REACTIONS entry
  *                     { type: "nudge", name }     name: a non-voter to poke
  *   server -> client: { type: "state", room, state }  (see publicState)
- *                     { type: "pong" } | { type: "error", message }
+ *                     { type: "pong" } | { type: "error", message, reason? }
+ *                       reason "pin": the room needs the correct 4-digit PIN
+ *                       (the socket opened via ?room=CODE&name=NAME&pin=PIN;
+ *                       the first joiner sets the PIN, later joiners must match)
  *                     { type: "react", emoji, name }   name: who reacted
  *                     { type: "nudge", name, from }    from: who poked
  *
@@ -36,6 +39,7 @@ import {
   mergeRooms,
   publicState,
   REACTIONS,
+  sanitizePin,
 } from "./poker.mjs";
 
 type Room = ReturnType<typeof createRoom>;
@@ -192,6 +196,11 @@ if (channel) {
     if (msg.event) applyEvent(room.state, msg.event);
     // Catch-up: adopt newer shared flags from the snapshot (no-op when the
     // event above already carried them).
+    // The room PIN is set once by the creator's isolate; adopt it here while
+    // this isolate is still uninitialised so its joiners are gated too.
+    if (room.state.password === null && msg.state.password !== null) {
+      room.state.password = msg.state.password;
+    }
     if (msg.state.revealedAt > room.state.revealedAt) {
       room.state.revealed = msg.state.revealed;
       room.state.revealedAt = msg.state.revealedAt;
@@ -405,6 +414,8 @@ export function handlePokerSocket(req: Request): Response {
   const theme = url.searchParams.get("theme") ?? "";
   // Observer (product owner): watches and reveals, never votes.
   const observer = url.searchParams.get("observer") === "1";
+  // Optional 4-digit room PIN; junk is treated as no PIN (see sanitizePin).
+  const pin = sanitizePin(url.searchParams.get("pin"));
 
   if (!CODE_PATTERN.test(code)) {
     return json({ error: "Invalid room code (4–8 letters/digits)." }, 400);
@@ -425,7 +436,28 @@ export function handlePokerSocket(req: Request): Response {
   socket.onopen = () => {
     const isNewHere = !rooms.has(code);
     const room = getRoom(code);
-    if (!applyEvent(room.state, { type: "join", id, name, theme, observer, at: Date.now() })) {
+    // Gate a protected room before the join so a wrong/missing PIN gets its own
+    // reason (the client then prompts, rather than dropping to solo mode). The
+    // merged view sees a PIN set on a sibling isolate; an uninitialised room
+    // (password null/"") lets this join through to set — or skip — the PIN.
+    const merged = mergeRooms(room.state, [...room.remotes.values()].map((r) => r.state));
+    if (merged.password && pin !== merged.password) {
+      send(socket, { type: "error", reason: "pin", message: "This room needs its 4-digit PIN." });
+      socket.close(1008, "wrong pin");
+      if (room.clients.size === 0) scheduleCleanup(code, room);
+      return;
+    }
+    if (
+      !applyEvent(room.state, {
+        type: "join",
+        id,
+        name,
+        theme,
+        observer,
+        password: pin,
+        at: Date.now(),
+      })
+    ) {
       send(socket, { type: "error", message: "Room is full." });
       socket.close(1008, "room full");
       if (room.clients.size === 0) scheduleCleanup(code, room);
