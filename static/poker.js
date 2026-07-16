@@ -17,6 +17,7 @@ import {
   sanitizeWheelNames,
   STATUSES,
 } from "./poker.mjs";
+import { notePick, weightedPick } from "./wheel.mjs";
 
 /** Theme id -> colour. Theme CSS variables adapt to dark/light mode. */
 const CARD_THEME_COLORS = {
@@ -1477,6 +1478,13 @@ els.noteText.addEventListener("input", () => {
 });
 els.noteDate.value = todayStr();
 
+// Fair-play weighting: the client keeps an in-memory tally of how often each
+// name has been picked this round (resets on reload). weightedPick/notePick
+// (see wheel.mjs) turn that into 0.5^picks odds so recently-picked names are
+// less likely but never impossible. Keyed by name so auto-shuffle and custom
+// lists both work.
+const pickCounts = new Map();
+
 els.spin.addEventListener("click", () => {
   if (!session || !lastState || wheelSpinning) return;
   let names = wheelNamesOf(lastState);
@@ -1490,7 +1498,8 @@ els.spin.addEventListener("click", () => {
   if (autoShuffle || !lastState.wheel.custom) {
     session.transport.send({ type: "wheel-set", names });
   }
-  const winner = names[Math.floor(Math.random() * names.length)];
+  const winner = weightedPick(names, pickCounts);
+  notePick(pickCounts, winner, names);
   session.transport.send({ type: "wheel-spin", winner });
 });
 

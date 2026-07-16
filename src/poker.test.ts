@@ -20,6 +20,7 @@ import {
   sanitizeWheelNames,
   STATUSES,
 } from "./poker.mjs";
+import { notePick, weightedPick } from "../static/wheel.mjs";
 
 function assertEquals(actual: unknown, expected: unknown, msg?: string): void {
   const a = JSON.stringify(actual);
@@ -407,4 +408,64 @@ Deno.test("mergeRooms resolves wheel list and spin last-writer-wins", () => {
   assertEquals(merged.wheelNames, ["New", "List"], "newer list wins");
   assertEquals(merged.wheelWinner, "Old", "newer spin wins");
   assertEquals(merged.wheelSpunAt, 30);
+});
+
+/* fair-play wheel weighting (static/wheel.mjs) — deterministic via injected rng */
+
+Deno.test("weightedPick: equal odds when nobody has been picked", () => {
+  const names = ["A", "B", "C", "D"];
+  const counts = new Map();
+  // All weights are 1 (total 4); rng maps linearly onto the four equal buckets.
+  assertEquals(weightedPick(names, counts, () => 0), "A");
+  assertEquals(weightedPick(names, counts, () => 0.3), "B"); // r=1.2 -> bucket 1
+  assertEquals(weightedPick(names, counts, () => 0.5), "C"); // r=2.0 -> bucket 2
+  assertEquals(weightedPick(names, counts, () => 0.99), "D");
+});
+
+Deno.test("weightedPick: a picked name gets halved odds (0.5^picks)", () => {
+  // A picked once -> weight 0.5; B unpicked -> weight 1.0; total 1.5.
+  // A owns [0, 0.5) of the weight line, so only rng < 0.5/1.5 (~0.333) picks A.
+  const counts = new Map([["A", 1]]);
+  assertEquals(weightedPick(["A", "B"], counts, () => 0.30), "A"); // r=0.45 < 0.5
+  assertEquals(weightedPick(["A", "B"], counts, () => 0.34), "B"); // r=0.51 > 0.5
+});
+
+Deno.test("weightedPick: a heavily penalised name is unlikely but still reachable", () => {
+  // A picked 3 times -> weight 0.125; B -> weight 1; total 1.125. A is never
+  // impossible: the very bottom of the weight line still selects it.
+  const counts = new Map([["A", 3]]);
+  assertEquals(weightedPick(["A", "B"], counts, () => 0.01), "A"); // r=0.011 < 0.125
+  assertEquals(weightedPick(["A", "B"], counts, () => 0.5), "B");
+});
+
+Deno.test("weightedPick: falls back to the last name if rng rounds to the top", () => {
+  assertEquals(weightedPick(["A", "B"], new Map(), () => 1), "B");
+});
+
+Deno.test("notePick: counts picks and does not reset mid-round", () => {
+  const counts = new Map();
+  const names = ["A", "B", "C"];
+  notePick(counts, "A", names);
+  assertEquals(counts.get("A"), 1);
+  notePick(counts, "A", names); // same name again before B/C are picked
+  assertEquals(counts.get("A"), 2);
+  assertEquals(counts.size, 1, "no reset until everyone has been picked");
+});
+
+Deno.test("notePick: resets to full odds once everyone has been picked", () => {
+  const counts = new Map();
+  const names = ["A", "B", "C"];
+  notePick(counts, "A", names);
+  notePick(counts, "B", names);
+  assertEquals(counts.size, 2);
+  notePick(counts, "C", names); // completes the round
+  assertEquals(counts.size, 0, "round complete -> everyone back to weight 1");
+});
+
+Deno.test("notePick: names that left the wheel don't block a reset", () => {
+  // A was picked earlier, then left; the current wheel is just [B, C].
+  const counts = new Map([["A", 2]]);
+  notePick(counts, "B", ["B", "C"]);
+  notePick(counts, "C", ["B", "C"]); // both current names picked -> reset
+  assertEquals(counts.size, 0);
 });
