@@ -76,3 +76,4 @@ rest; it lives on room state, is gossiped between isolates, but is never exposed
 - Tests are deliberately std-free (a local `assertEquals`) so they run offline.
 - Deploy: Render Docker web service (`Dockerfile` + `render.yaml`, health check `/health`,
   auto-deploy on push); also runs on Deno Deploy with entrypoint `main.ts`.
+- Don't write any specs unless requested.

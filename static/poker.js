@@ -39,6 +39,13 @@ const $ = (id) => document.getElementById(id);
 const els = {
   conn: $("conn"),
   connectHint: $("connect-hint"),
+  notifyHint: $("notify-hint"),
+  notifyHintIcon: $("notify-hint-icon"),
+  notifyHintTitle: $("notify-hint-title"),
+  notifyHintBody: $("notify-hint-body"),
+  notifyHintSetup: $("notify-hint-setup"),
+  notifyHintEnable: $("notify-hint-enable"),
+  notifyHintDismiss: $("notify-hint-dismiss"),
   join: $("join"),
   joinError: $("join-error"),
   joinBtn: $("join-btn"),
@@ -629,15 +636,20 @@ function reflectNotifyToggle() {
 function notifySetupHint() {
   const mac = /Mac/.test(navigator.platform ?? "");
   return mac
-    ? "macOS shows the banner, so allow Chrome under System Settings → " +
+    ? "To show alert for MacOS, allow Chrome under System Settings → " +
       "Notifications and pick the “Alerts” style to keep a nudge on screen."
     : "If no banner appears, allow browser notifications in your system settings.";
 }
 
-async function toggleNudgeNotifications() {
+/* `silent` suppresses the toasts for the entry banner below, which reports the
+   outcome in place — two acknowledgements for one click reads as a stutter. */
+async function toggleNudgeNotifications(silent = false) {
+  const say = (message) => {
+    if (!silent) showToast(message);
+  };
   if (notifyEnabled()) {
     setNotifyPref(false);
-    showToast("Nudge notifications off");
+    say("Nudge notifications off");
   } else {
     // Chrome only shows the permission prompt on a user gesture — this click.
     // An earlier "block" can't be re-asked; it must be undone in site settings.
@@ -649,10 +661,10 @@ async function toggleNudgeNotifications() {
       // The worker exists only for Android's notification path; it has no
       // fetch handler, so nothing is intercepted or cached (see sw.js).
       navigator.serviceWorker?.register("sw.js").catch(() => {});
-      showToast("You'll get a notification when nudged");
+      say("You'll get a notification when nudged");
     } else {
       setNotifyPref(false);
-      showToast(
+      say(
         perm === "denied"
           ? "Notifications are blocked in the browser's site settings"
           : "Notifications stay off",
@@ -660,6 +672,91 @@ async function toggleNudgeNotifications() {
     }
   }
   reflectNotifyToggle();
+}
+
+/* --------------------- nudge-alert offer on room entry -------------------- */
+/* Nudge alerts are off until someone finds the bell, so most players never
+   learn they exist. On the first live room entry the banner makes the offer
+   once; declining is remembered for good. Granting permission isn't the end of
+   it — macOS can still swallow the banner — so the confirmation carries
+   notifySetupHint() instead of leaving it buried in the bell's tooltip. */
+
+const NOTIFY_HINT_KEY = "meso-poker-notify-hint";
+/** Once per page load: `up` also fires on every reconnect. */
+let notifyHintOffered = false;
+
+function notifyHintDismissed() {
+  try {
+    return localStorage.getItem(NOTIFY_HINT_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+/** Hide for good — a declined offer shouldn't come back; the bell remains. */
+function dismissNotifyHint() {
+  els.notifyHint.hidden = true;
+  try {
+    localStorage.setItem(NOTIFY_HINT_KEY, "1");
+  } catch {
+    /* fine */
+  }
+}
+
+/** @param {"offer" | "granted" | "blocked"} state */
+function paintNotifyHint(state) {
+  const text = {
+    offer: {
+      icon: "🔔",
+      title: "Get a heads-up when it's your turn",
+      body: "We'll notify you if a teammate nudges you while this tab is in the background.",
+      setup: notifySetupHint(),
+      dismiss: "Not now",
+    },
+    granted: {
+      icon: "✅",
+      title: "Nudge alerts are on",
+      body: "You'll get a banner when a teammate nudges you.",
+      setup: notifySetupHint(),
+      dismiss: "Got it",
+    },
+    blocked: {
+      icon: "🔒",
+      title: "Notifications are blocked",
+      body: "Your browser blocked them for this site. Re-allow them in the address bar, " +
+        "then switch the bell on.",
+      // The browser never asks the system, so the OS step isn't the fix here.
+      setup: "",
+      dismiss: "Dismiss",
+    },
+  }[state];
+  els.notifyHintIcon.textContent = text.icon;
+  els.notifyHintTitle.textContent = text.title;
+  els.notifyHintBody.textContent = text.body;
+  els.notifyHintSetup.textContent = text.setup;
+  els.notifyHintSetup.hidden = !text.setup;
+  els.notifyHintDismiss.textContent = text.dismiss;
+  // Only the offer can be acted on: a denial can't be re-prompted from script.
+  els.notifyHintEnable.hidden = state !== "offer";
+  els.notifyHint.classList.toggle("is-good", state === "granted");
+  els.notifyHint.classList.toggle("is-warn", state === "blocked");
+  els.notifyHint.hidden = false;
+}
+
+/** Called once a live room is confirmed — solo mode relays no nudges. */
+function maybeOfferNudgeAlerts() {
+  if (notifyHintOffered) return;
+  notifyHintOffered = true;
+  if (!("Notification" in globalThis)) return;
+  if (notifyEnabled() || notifyHintDismissed()) return;
+  paintNotifyHint(Notification.permission === "denied" ? "blocked" : "offer");
+}
+
+async function enableFromNotifyHint() {
+  await toggleNudgeNotifications(true);
+  if (notifyEnabled()) paintNotifyHint("granted");
+  else if (Notification.permission === "denied") paintNotifyHint("blocked");
+  // Permission prompt dismissed without a choice: leave the offer standing.
 }
 
 /* -------------------------------- room notes ------------------------------ */
@@ -1334,7 +1431,10 @@ function joinRoom(code, pinArg) {
     },
     react: (msg) => floatReaction(String(msg.emoji ?? ""), String(msg.name ?? "")),
     nudge: (msg) => onNudge(String(msg.name ?? ""), String(msg.from ?? "")),
-    up: () => setConn("live"),
+    up: () => {
+      setConn("live");
+      maybeOfferNudgeAlerts();
+    },
     down: () => {
       setConn("reconnecting");
       // Treat whatever arrives after a reconnect as history: show the last
@@ -1406,6 +1506,7 @@ function leaveRoom() {
   els.noteText.value = "";
   // The PIN is per-room; clear the field so it never carries to the next join.
   els.roomPin.value = "";
+  els.notifyHint.hidden = true;
   setConn(null);
   history.replaceState(null, "", location.pathname);
   els.roomCode.focus();
@@ -1422,9 +1523,18 @@ buildReactions();
 // show notifications at all; the title flash needs no setup and always runs.
 if ("Notification" in globalThis) {
   els.nudgeNotify.hidden = false;
-  els.nudgeNotify.addEventListener("click", toggleNudgeNotifications);
+  // Wrapped: passed directly, the MouseEvent would arrive as `silent`.
+  // Using the bell settles the question the banner is asking — and would leave
+  // a granted confirmation stale if the same click switched alerts back off —
+  // so the offer retires either way.
+  els.nudgeNotify.addEventListener("click", async () => {
+    await toggleNudgeNotifications();
+    dismissNotifyHint();
+  });
   reflectNotifyToggle();
 }
+els.notifyHintEnable.addEventListener("click", enableFromNotifyHint);
+els.notifyHintDismiss.addEventListener("click", dismissNotifyHint);
 addEventListener("visibilitychange", () => {
   if (!document.hidden) clearNudgeAlerts();
 });

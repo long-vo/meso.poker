@@ -20,6 +20,9 @@
     </nav>
     <div class="topbar-actions">
       <span id="conn" class="pill" hidden></span>
+      <button id="nudge-notify" class="icon-btn" type="button" aria-pressed="false" hidden
+        title="Notify me when I'm nudged in a background tab"
+        aria-label="Notify me when I'm nudged in a background tab">🔕</button>
       <button id="theme-toggle" class="icon-btn" type="button" aria-label="Toggle colour theme">
         <span class="theme-icon">🌙</span>
       </button>
@@ -72,6 +75,18 @@
 
     <section id="table" hidden>
       <p id="connect-hint" class="connect-hint" role="status" aria-live="polite" hidden></p>
+      <div id="notify-hint" class="notify-hint" role="status" aria-live="polite" hidden>
+        <span id="notify-hint-icon" aria-hidden="true">🔔</span>
+        <div class="notify-hint-text">
+          <strong id="notify-hint-title"></strong>
+          <span id="notify-hint-body"></span>
+          <small id="notify-hint-setup" hidden></small>
+        </div>
+        <div class="notify-hint-actions">
+          <button id="notify-hint-enable" class="btn btn-primary" type="button">Enable</button>
+          <button id="notify-hint-dismiss" class="btn" type="button">Not now</button>
+        </div>
+      </div>
       <div class="table-side">
         <div class="panel table-bar">
           <div class="panel-head">
@@ -130,9 +145,6 @@
         <div class="panel-head">
           <h2>Players</h2>
           <span id="round-status" class="status"></span>
-          <button id="nudge-notify" class="notify-toggle" type="button" aria-pressed="false" hidden
-            title="Notify me when I'm nudged in a background tab"
-            aria-label="Notify me when I'm nudged in a background tab">🔕</button>
         </div>
         <div id="players" class="players"></div>
         <div class="results-row">
