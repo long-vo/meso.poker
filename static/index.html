@@ -23,6 +23,15 @@
       <button id="nudge-notify" class="icon-btn" type="button" aria-pressed="false" hidden
         title="Notify me when I'm nudged in a background tab"
         aria-label="Notify me when I'm nudged in a background tab">🔕</button>
+      <button id="controls-toggle" class="icon-btn" type="button" hidden
+        aria-controls="table-side" aria-expanded="true" title="Hide controls"
+        aria-label="Hide controls sidebar">
+        <svg viewBox="0 0 20 20" width="18" height="18" fill="none" stroke="currentColor"
+          stroke-width="1.6" stroke-linejoin="round" aria-hidden="true">
+          <rect x="2.75" y="4.5" width="14.5" height="11" rx="2.25" />
+          <line x1="8" y1="4.5" x2="8" y2="15.5" />
+        </svg>
+      </button>
       <button id="theme-toggle" class="icon-btn" type="button" aria-label="Toggle colour theme">
         <span class="theme-icon">🌙</span>
       </button>
@@ -87,7 +96,7 @@
           <button id="notify-hint-dismiss" class="btn" type="button">Not now</button>
         </div>
       </div>
-      <div class="table-side">
+      <div id="table-side" class="table-side">
         <div class="panel table-bar">
           <div class="panel-head">
             <div class="room-info">

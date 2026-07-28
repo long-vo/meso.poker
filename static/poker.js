@@ -90,6 +90,8 @@ const els = {
   reactions: $("reactions"),
   reactionLayer: $("reaction-layer"),
   nudgeNotify: $("nudge-notify"),
+  controlsToggle: $("controls-toggle"),
+  tableSide: $("table-side"),
   notesList: $("notes-list"),
   notesStatus: $("notes-status"),
   noteDate: $("note-date"),
@@ -1002,6 +1004,50 @@ function renderPlayers(state) {
    update it without extra wiring. */
 let observerKey = "";
 
+/* One sleeve colour per PO, so two of them are told apart at a glance. Hashing
+   the name (rather than using the list position) keeps a colour attached to a
+   person: it survives re-renders, and every client paints the same PO the same
+   shade without the room having to carry the assignment. */
+function nameHash(name) {
+  let h = 0;
+  // Iterate code points, matching how the monogram picks its initial.
+  for (const ch of name) h = (h * 31 + ch.codePointAt(0)) % 2147483647;
+  return h;
+}
+
+/* The card sleeves, minus violet. Two reasons to drop it: violet is already the
+   colour of your own name in the players grid, and it is the one sleeve that
+   misses contrast on the dark panel (3.98:1 against 4.5 needed once the phone
+   breakpoint takes the name down to 14px). The rest clear it in both themes. */
+const OBSERVER_SLEEVES = CARD_THEMES.filter((t) => t !== "violet");
+
+/* Four sleeves and usually a handful of POs, so a plain hash collides often
+   enough to notice — losing exactly the distinction this is for. Colliding names
+   walk to the next free sleeve instead. Deterministic on every client: the
+   observer list comes from shared room state in join order. */
+function observerColors(names) {
+  const taken = new Set();
+  return names.map((name) => {
+    let i = nameHash(name) % OBSERVER_SLEEVES.length;
+    // Stop once every sleeve is spoken for (a 5th PO) and let colours repeat.
+    while (taken.has(i) && taken.size < OBSERVER_SLEEVES.length) {
+      i = (i + 1) % OBSERVER_SLEEVES.length;
+    }
+    taken.add(i);
+    return CARD_THEME_COLORS[OBSERVER_SLEEVES[i]];
+  });
+}
+
+/* Monogram tile instead of a repeated icon: the observer's initial on a soft
+   wash of the name's own colour. Decorative — the full name sits right beside
+   it, and the panel's "Observing" label already names the role. */
+function observerAvatar(name) {
+  // Spread rather than name[0]: an emoji or other astral first character is one
+  // code point but two UTF-16 units, and half a surrogate pair renders as "�".
+  const initial = ([...name][0] ?? "").toUpperCase();
+  return `<span class="observer-avatar" aria-hidden="true">${escapeHtml(initial)}</span>`;
+}
+
 function renderObservers(state) {
   const observers = state.participants.filter((p) => p.observer);
   const key = observers.map((p) => p.name).join("\n");
@@ -1014,9 +1060,16 @@ function renderObservers(state) {
     els.observerPanel.classList.remove("show");
     return;
   }
+  const colors = observerColors(observers.map((p) => p.name));
   els.observerNames.innerHTML = observers
-    .map((p) => `👁 ${escapeHtml(p.name)}`)
-    .join("<br />");
+    .map((p, i) =>
+      `<span class="observer-name" style="--observer-color: ${colors[i]}">${
+        observerAvatar(p.name)
+      }<span>${escapeHtml(p.name)}</span></span>`
+    )
+    // Newline, not "": a flex container drops whitespace-only nodes, so it costs
+    // no layout and keeps the names separated for screen readers.
+    .join("\n");
   els.observerPanel.hidden = false;
   els.observerPanel.classList.remove("show");
   // Force a style flush so re-adding the class replays the slide-in.
@@ -1345,6 +1398,39 @@ function alignThemeDots() {
   els.cardThemes.style.marginTop = `${Math.max(0, Math.round(offset))}px`;
 }
 
+/* ---------------------------- controls sidebar ---------------------------- */
+
+/* The left column (room bar, story, notes) folds away entirely via the topbar
+   toggle, giving the play area the freed width. Unlike the per-panel chevrons
+   this is a lasting preference, so it's remembered per browser — the flag lives
+   on <html> and the CSS does the reflow. */
+const CONTROLS_KEY = "meso-poker-controls-hidden";
+let controlsHidden = false;
+
+function reflectControlsToggle() {
+  document.documentElement.toggleAttribute("data-controls-collapsed", controlsHidden);
+  els.controlsToggle.setAttribute("aria-expanded", String(!controlsHidden));
+  const label = controlsHidden ? "Show controls" : "Hide controls";
+  els.controlsToggle.title = label;
+  els.controlsToggle.setAttribute("aria-label", `${label} sidebar`);
+}
+
+function toggleControls() {
+  // Move focus off the column first, so it is never stranded on a hidden field.
+  if (!controlsHidden && els.tableSide.contains(document.activeElement)) {
+    els.controlsToggle.focus();
+  }
+  controlsHidden = !controlsHidden;
+  reflectControlsToggle();
+  try {
+    localStorage.setItem(CONTROLS_KEY, controlsHidden ? "1" : "");
+  } catch {
+    /* fine */
+  }
+  // The play area just changed width, so the deck may have reflowed.
+  alignThemeDots();
+}
+
 /* ------------------------------ join / leave ----------------------------- */
 
 /* A room's PIN is remembered per code in localStorage so returning to a
@@ -1475,6 +1561,7 @@ function joinRoom(code, pinArg) {
   els.roomChip.textContent = code;
   els.join.hidden = true;
   els.table.hidden = false;
+  els.controlsToggle.hidden = false;
   // The table just became visible; align the theme dots once it has laid out.
   requestAnimationFrame(alignThemeDots);
   history.replaceState(null, "", `?room=${code}`);
@@ -1486,6 +1573,7 @@ function leaveRoom() {
   lastState = null;
   els.table.hidden = true;
   els.join.hidden = false;
+  els.controlsToggle.hidden = true;
   els.story.value = "";
   wheelRotation = 0;
   wheelSpinning = false;
@@ -1578,6 +1666,14 @@ els.table.addEventListener("click", (e) => {
   toggle.setAttribute("aria-expanded", String(!collapsed));
   toggle.setAttribute("aria-label", `${collapsed ? "Expand" : "Collapse"} ${toggle.dataset.label}`);
 });
+
+try {
+  controlsHidden = localStorage.getItem(CONTROLS_KEY) === "1";
+} catch {
+  /* fine */
+}
+reflectControlsToggle();
+els.controlsToggle.addEventListener("click", toggleControls);
 
 els.reveal.addEventListener("click", () => session?.transport.send({ type: "reveal" }));
 els.reset.addEventListener("click", () => session?.transport.send({ type: "reset" }));

@@ -136,13 +136,30 @@ body {
   gap: 12px;
 }
 
-/* On a phone the bar can't hold the breadcrumb plus the room pill and both icon
+/* On a phone the bar can't hold the breadcrumb plus the room pill and the icon
    buttons. The current-page crumb is the redundant part — the page *is* the
-   poker table — so it goes rather than letting the bar overflow sideways. */
+   poker table — so it goes rather than letting the bar overflow sideways, and
+   the buttons close ranks to make the last few pixels fit. */
 @media (max-width: 480px) {
   .crumb-sep,
   .crumb-current {
     display: none;
+  }
+  .topbar-actions {
+    gap: 6px;
+  }
+  /* Below ~370px even that isn't enough, so the wordmark gives up its last
+     pixels instead of the bar scrolling sideways. min-width:0 on the flex
+     chain is what lets it shrink at all. */
+  .brand,
+  .brand-link {
+    min-width: 0;
+  }
+  .brand-name {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 }
 
@@ -172,6 +189,20 @@ body {
 .icon-btn:hover {
   border-color: var(--border-strong);
   transform: translateY(-1px);
+}
+
+/* Controls show/hide toggle: centre the inline SVG and read as "active"
+   (accent-tinted) while the column is visible. The button is itself [hidden]
+   on the join screen, where there is no column to fold, so the display rule
+   must not outrank that. */
+#controls-toggle:not([hidden]) {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+#controls-toggle[aria-expanded="true"] {
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
 }
 
 /* Base chip for the estimate-distribution tags shown after reveal (.dist-chip
@@ -217,6 +248,21 @@ body {
   flex-direction: column;
   gap: 18px;
   min-width: 0;
+}
+
+/* ---- controls show/hide ----
+   The topbar toggle (#controls-toggle) folds the whole left column away and the
+   play area takes the freed width; the flag lives on <html> and is remembered in
+   localStorage (see poker.js). The attribute selector outranks the responsive
+   one-column rule, so the two-track override is fenced to the wide layout —
+   stacked, the hidden column simply drops its row. */
+:root[data-controls-collapsed] .table-side {
+  display: none;
+}
+@media (min-width: 961px) {
+  :root[data-controls-collapsed] .poker > section[id="table"] {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
 }
 
 /* Cold-start banner: spans the full table width above the columns while the
@@ -1040,17 +1086,71 @@ button.wheel-chip:hover .chip-x {
   transform: translateX(0);
   opacity: 1;
 }
-/* names match the pick panel's announcement type */
+/* Names match the pick panel's announcement type. */
 .observer-names {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
   margin-top: 6px;
   font-size: 22px;
-  font-weight: 800;
+  font-weight: 700;
   word-break: break-word;
 }
+/* Each PO gets their own sleeve colour, set as --observer-color on the row by
+   poker.js; the name and its monogram both read it through currentColor, so one
+   custom property paints the whole entry. --mask is the fallback: it was the
+   single colour every observer used before. */
+.observer-name {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  color: var(--observer-color, var(--mask));
+}
+/* The sleeve colours are tuned for card backs on a dark table, and on white the
+   weakest of them (--accent at 4.55:1, --mask at 4.38:1) misses AA for the 14px
+   phone name — and misses by more for the monogram letter, which sits on a wash
+   of its own colour. One uniform darkening covers every sleeve rather than four
+   hand-picked values, and leaves the shared tokens alone: 6.3:1 or better for
+   every name, 5:1 or better for every letter. */
+:root[data-theme="light"] .observer-name {
+  color: color-mix(in srgb, var(--observer-color, var(--mask)) 80%, #000);
+}
+/* Monogram tile: the initial on a soft wash of currentColor, so the tile always
+   harmonises with whatever colour the names are given. Every dimension is em off
+   the tile's own font-size, so the phone breakpoint's smaller type shrinks the
+   whole thing with no second rule; the top margin centres it on the first line
+   when a long name wraps to two. */
+.observer-avatar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 2em;
+  height: 2em;
+  margin-top: 0.14em;
+  border-radius: 0.6em;
+  background: color-mix(in srgb, currentColor 15%, transparent);
+  font-size: 0.66em;
+  font-weight: 700;
+  line-height: 1;
+}
 
+/* On a phone the panel overlays the table instead of getting its own lane, so
+   it gives up the announcement type scale and shrinks to a corner label. */
 @media (max-width: 720px) {
   .observer-panel {
     right: 12px;
+    min-width: 0;
+    max-width: 44vw;
+    padding: 10px 12px;
+  }
+  .observer-panel .pick-label {
+    font-size: 11px;
+  }
+  .observer-names {
+    gap: 2px;
+    margin-top: 4px;
+    font-size: 14px;
   }
 }
 

@@ -7,3 +7,5 @@ deno.lock
 .idea/
 .vscode/
 *.log
+
+.claude/skills/
