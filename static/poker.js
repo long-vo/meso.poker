@@ -526,7 +526,7 @@ function onNudge(target, from) {
   wigglePlayer(target);
   const mine = lastState?.participants.find((p) => p.you);
   if (mine?.name === target) {
-    showToast(`👉 ${from} nudged you — pick a card!`);
+    showToast(`👋 ${from} nudged you — pick a card!`);
     navigator.vibrate?.([200, 100, 200, 100, 400]);
     // A tab you aren't looking at shows neither the wiggle nor the toast, so
     // escalate: flash the tab title and, when the bell is switched on, raise a
@@ -562,7 +562,7 @@ function startTitleFlash() {
   clearInterval(titleFlashTimer);
   let flip = true;
   const tick = () => {
-    document.title = flip ? "👉 Pick a card!" : baseTitle;
+    document.title = flip ? "👋 Pick a card!" : baseTitle;
     flip = !flip;
   };
   tick();
@@ -596,7 +596,7 @@ function notifyEnabled() {
 
 function showNudgeNotification(from) {
   if (!notifyEnabled()) return;
-  const title = `👉 ${from} nudged you`;
+  const title = `👋 ${from} nudged you`;
   // requireInteraction keeps the banner on screen until it's dismissed (Windows
   // and Linux); macOS ignores it — there the "Alerts" style is the only lever,
   // which is what notifySetupHint() asks for.
@@ -1109,7 +1109,7 @@ function renderResults(state) {
         `<span class="dist-chip__count">${count}</span></span>`,
     );
   }
-  if (stats.consensus) parts.push(`<span class="consensus">🎉 Consensus!</span>`);
+  if (stats.consensus) parts.push(`<span class="consensus">✨ Consensus!</span>`);
   els.results.innerHTML = parts.join("");
 }
 
@@ -1411,9 +1411,9 @@ function alignThemeDots() {
 /* ---------------------------- controls sidebar ---------------------------- */
 
 /* The left column (room bar, story, notes) folds away entirely via the topbar
-   toggle, giving the play area the freed width. Unlike the per-panel chevrons
-   this is a lasting preference, so it's remembered per browser — the flag lives
-   on <html> and the CSS does the reflow. */
+   toggle, giving the play area the freed width. Like the per-panel chevrons
+   this is remembered per browser — the flag lives on <html> and the CSS does
+   the reflow. */
 const CONTROLS_KEY = "meso-poker-controls-hidden";
 let controlsHidden = false;
 
@@ -1671,14 +1671,43 @@ els.invite.addEventListener("click", async () => {
 });
 
 // Collapsible left-column panels. Local view state only — not a room rule, so
-// it stays out of poker.mjs and never touches the transport. Reset on reload.
+// it stays out of poker.mjs and never touches the transport. Which panels are
+// folded is remembered per browser, keyed by the body id each toggle controls.
+const COLLAPSED_KEY = "meso-poker-collapsed";
+
+/**
+ * @param {HTMLElement} toggle
+ * @param {boolean} collapsed
+ */
+function reflectPanelToggle(toggle, collapsed) {
+  toggle.setAttribute("aria-expanded", String(!collapsed));
+  toggle.setAttribute("aria-label", `${collapsed ? "Expand" : "Collapse"} ${toggle.dataset.label}`);
+}
+
 els.table.addEventListener("click", (e) => {
   const toggle = e.target.closest(".panel-toggle");
   if (!toggle) return;
-  const collapsed = toggle.closest(".panel").classList.toggle("collapsed");
-  toggle.setAttribute("aria-expanded", String(!collapsed));
-  toggle.setAttribute("aria-label", `${collapsed ? "Expand" : "Collapse"} ${toggle.dataset.label}`);
+  reflectPanelToggle(toggle, toggle.closest(".panel").classList.toggle("collapsed"));
+  const folded = [...els.table.querySelectorAll(".panel-toggle")]
+    .filter((t) => t.closest(".panel").classList.contains("collapsed"))
+    .map((t) => t.getAttribute("aria-controls"));
+  try {
+    localStorage.setItem(COLLAPSED_KEY, folded.join(","));
+  } catch {
+    /* fine */
+  }
 });
+
+try {
+  const folded = (localStorage.getItem(COLLAPSED_KEY) ?? "").split(",");
+  for (const toggle of els.table.querySelectorAll(".panel-toggle")) {
+    if (!folded.includes(toggle.getAttribute("aria-controls"))) continue;
+    toggle.closest(".panel").classList.add("collapsed");
+    reflectPanelToggle(toggle, true);
+  }
+} catch {
+  /* fine */
+}
 
 try {
   controlsHidden = localStorage.getItem(CONTROLS_KEY) === "1";

@@ -38,7 +38,7 @@ export const LIMITS = {
  * list and fans the message out to every open socket (see poker-server.ts),
  * so late joiners simply never see past reactions.
  */
-export const REACTIONS = ["👍", "🎉", "🤯", "☕"];
+export const REACTIONS = ["👍", "🎉", "🤯", "😴"];
 
 /**
  * Presence statuses a player can set on themselves (like a card theme: the
@@ -48,9 +48,9 @@ export const REACTIONS = ["👍", "🎉", "🤯", "☕"];
  * tally and can't be nudged (see the client render and the server nudge guard).
  */
 export const STATUSES = [
-  { id: "away", emoji: "🚶", label: "Away", away: true },
+  { id: "away", emoji: "🚪", label: "Away", away: true },
   { id: "break", emoji: "☕", label: "Break", away: true },
-  { id: "brb", emoji: "🕐", label: "BRB", away: true },
+  { id: "brb", emoji: "⏱️", label: "BRB", away: true },
   { id: "thinking", emoji: "🤔", label: "Thinking", away: false },
 ];
 
