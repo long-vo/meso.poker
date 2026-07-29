@@ -5,3 +5,9 @@ services:
     plan: free
     healthCheckPath: /health
     autoDeploy: true
+    envVars:
+      # Bearer token for GET /api/poker/stats, which publishes live room codes.
+      # sync: false keeps it out of git — set the value in the Render dashboard.
+      # Leave it unset and the endpoint 404s, which is the safe default.
+      - key: STATS_TOKEN
+        sync: false

@@ -41,6 +41,7 @@ import {
   REACTIONS,
   sanitizePin,
 } from "./poker.mjs";
+import { recordRoomActivity, recordRoomClosed } from "./poker-stats.ts";
 
 type Room = ReturnType<typeof createRoom>;
 type RoomEvent = Parameters<typeof applyEvent>[1];
@@ -169,12 +170,25 @@ function pushState(code: string, room: LocalRoom): void {
   }
 }
 
+/**
+ * Head count across every isolate, for the stats record. Each isolate reports
+ * the merged view it can see, so the stored number is last-writer-wins and may
+ * lag a sibling's join by up to one heartbeat.
+ */
+function mergedHeadCount(room: LocalRoom): number {
+  const merged = mergeRooms(room.state, [...room.remotes.values()].map((r) => r.state));
+  return Object.keys(merged.participants).length;
+}
+
 /** When the last local socket is gone, keep the state briefly, then drop it. */
 function scheduleCleanup(code: string, room: LocalRoom): void {
   clearTimeout(room.emptyTimer);
   room.emptyTimer = setTimeout(() => {
     const current = rooms.get(code);
-    if (current === room && current.clients.size === 0) rooms.delete(code);
+    if (current === room && current.clients.size === 0) {
+      rooms.delete(code);
+      recordRoomClosed(code);
+    }
   }, EMPTY_ROOM_TTL_MS);
 }
 
@@ -244,6 +258,9 @@ setInterval(() => {
       }
     }
     broadcast(code, room);
+    // Keeps the room's stats record fresh; a room that stops being refreshed
+    // reads as no longer live, which is what covers a hard process kill.
+    recordRoomActivity(code, mergedHeadCount(room));
     let pruned = false;
     for (const [id, remote] of room.remotes) {
       if (remote.seenAt < cutoff) {
@@ -299,6 +316,7 @@ function handleClientMessage(code: string, room: LocalRoom, id: string, raw: str
       if (applyEvent(room.state, { type: "leave", id })) {
         broadcast(code, room);
         pushState(code, room);
+        recordRoomActivity(code, mergedHeadCount(room));
       }
       if (room.clients.size === 0) scheduleCleanup(code, room);
       return;
@@ -469,6 +487,9 @@ export function handlePokerSocket(req: Request): Response {
     // freshly-opened room catches up on participants, story and reveal state.
     broadcast(code, room, isNewHere ? { hello: true } : undefined);
     pushState(code, room);
+    // The first join is what creates the room as far as stats go: a code nobody
+    // ever joined was never a room.
+    recordRoomActivity(code, mergedHeadCount(room));
   };
 
   socket.onmessage = (e) => {
@@ -485,6 +506,7 @@ export function handlePokerSocket(req: Request): Response {
     if (applyEvent(room.state, { type: "leave", id })) {
       broadcast(code, room);
       pushState(code, room);
+      recordRoomActivity(code, mergedHeadCount(room));
     }
     if (room.clients.size === 0) scheduleCleanup(code, room);
   };

@@ -528,10 +528,12 @@ function onNudge(target, from) {
   if (mine?.name === target) {
     showToast(`👉 ${from} nudged you — pick a card!`);
     navigator.vibrate?.([200, 100, 200, 100, 400]);
-    // A hidden tab shows neither the wiggle nor the toast, so escalate: flash
-    // the tab title and, when the bell is switched on, raise a system
-    // notification (see the section below).
-    if (document.hidden) {
+    // A tab you aren't looking at shows neither the wiggle nor the toast, so
+    // escalate: flash the tab title and, when the bell is switched on, raise a
+    // system notification (see the section below). `hidden` alone isn't enough —
+    // it stays false for the active tab of an unfocused window (second monitor,
+    // Chrome behind another app), which is exactly when the alert is wanted.
+    if (document.hidden || !document.hasFocus()) {
       startTitleFlash();
       showNudgeNotification(from);
     }
@@ -541,13 +543,13 @@ function onNudge(target, from) {
 }
 
 /* ---------------------- background-tab nudge alerts ---------------------- */
-/* A nudge that lands while this tab is hidden would go unseen: the tab title
-   flashes until the player returns (needs no permission), and — once the bell
-   in the players panel is switched on — a system notification fires too.
-   Alerts clear as soon as the tab is visible again, the vote is cast, the
+/* A nudge that lands while this tab is hidden or unfocused would go unseen: the
+   tab title flashes until the player returns (needs no permission), and — once
+   the bell in the players panel is switched on — a system notification fires
+   too. Alerts clear as soon as the tab is looked at again, the vote is cast, the
    player steps away, or the round resolves (see render and the
-   visibilitychange listener). Solo mode never relays nudges, so none of this
-   runs there. */
+   visibilitychange/focus listeners). Solo mode never relays nudges, so none of
+   this runs there. */
 
 const NOTIFY_PREF_KEY = "meso-poker-notify";
 const NUDGE_TAG = "meso-poker-nudge";
@@ -595,7 +597,15 @@ function notifyEnabled() {
 function showNudgeNotification(from) {
   if (!notifyEnabled()) return;
   const title = `👉 ${from} nudged you`;
-  const options = { body: "Everyone's waiting — pick a card", tag: NUDGE_TAG, renotify: true };
+  // requireInteraction keeps the banner on screen until it's dismissed (Windows
+  // and Linux); macOS ignores it — there the "Alerts" style is the only lever,
+  // which is what notifySetupHint() asks for.
+  const options = {
+    body: "Everyone's waiting — pick a card",
+    tag: NUDGE_TAG,
+    renotify: true,
+    requireInteraction: true,
+  };
   try {
     const n = new Notification(title, options);
     n.onclick = () => {
@@ -1626,6 +1636,9 @@ els.notifyHintDismiss.addEventListener("click", dismissNotifyHint);
 addEventListener("visibilitychange", () => {
   if (!document.hidden) clearNudgeAlerts();
 });
+// An alert raised while the window was merely unfocused sees no
+// visibilitychange on return — clicking back in is the only signal.
+addEventListener("focus", clearNudgeAlerts);
 
 // Re-centre the theme dots when the viewport changes; render() handles the
 // state-driven relayouts (players joining, results appearing, and so on).

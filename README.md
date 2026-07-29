@@ -60,6 +60,41 @@ Set `PORT` to change the port locally (e.g. `PORT=3000 deno task start`).
 
 `GET /health` returns a liveness JSON payload.
 
+## Room statistics
+
+`GET /api/poker/stats` reports room lifecycle over a rolling 7 days — one record per room session
+with `createdAt`, `destroyedAt` (null while live), duration, head count and peak. It publishes room
+codes, and a code is all anyone needs to join a room that has no PIN, so it is gated: set
+`STATS_TOKEN` and pass `Authorization: Bearer <token>`. With `STATS_TOKEN` unset the route 404s,
+which is the safe default.
+
+```sh
+curl -H "Authorization: Bearer $STATS_TOKEN" http://localhost:8000/api/poker/stats
+```
+
+Records live in [Deno KV](https://docs.deno.com/deploy/kv/manual/), so they survive a restart and
+are shared across isolates — hence `--unstable-kv` and write access in the tasks and the
+`Dockerfile`. `POKER_KV_PATH` pins the database file (the container points it at `/tmp`); unset
+means Deno Deploy's managed store, or a file under `DENO_DIR` locally. If KV is unavailable the
+recorders turn into no-ops and the endpoint answers 503 — collecting statistics can never break a
+room.
+
+`live` is derived from freshness rather than from `destroyedAt`: every isolate refreshes the record
+on its 30 s heartbeat, so a room whose process was killed ages out instead of being reported live
+forever. `destroyedAt` is therefore best-effort.
+
+**Free-tier caveat:** Render's free plan has no persistent disk and spins down when idle, so the
+database resets at every cold start and statistics there reach back only to the last wake, not a
+full 7 days. Deno Deploy gives the real window.
+
+### Logging to Google Sheets
+
+`scripts/drive-stats-sync.gs` is a Google Apps Script that polls the endpoint and keeps one row per
+room session in a Sheet — which is what turns the rolling 7-day window into a permanent log. It
+needs no credentials on the server: the token lives in the script's own properties, and the Drive
+side owns the Sheet. It syncs lifecycle data only, no participant names, so the Sheet holds no
+personal data. Setup instructions are in the file's header comment.
+
 ## Deploy to Render
 
 The live instance runs on [Render](https://render.com/) as a Docker web service — see `Dockerfile`
@@ -82,7 +117,11 @@ render.yaml           Render Blueprint: free web service, /health check
 src/
   poker.mjs           shared poker-room reducer (server + browser solo mode)
   poker-server.ts     poker rooms: WebSocket handling + isolate gossip
+  poker-stats.ts      7-day room lifecycle log (Deno KV) + /api/poker/stats
   poker.test.ts       poker reducer tests
+  poker-stats.test.ts stats window, liveness and token tests
+scripts/
+  drive-stats-sync.gs Apps Script: sync /api/poker/stats into a Google Sheet
 static/
   index.html          Scrum Poker UI
   poker.js            poker client (WebSocket + solo fallback)

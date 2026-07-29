@@ -13,9 +13,11 @@
  *   GET  /poker.js       -> poker client
  *   GET  /poker.mjs      -> shared poker-room module (server + browser)
  *   GET  /api/poker/ws   -> WebSocket upgrade for a scrum-poker room
+ *   GET  /api/poker/stats-> 7-day room lifecycle stats (needs STATS_TOKEN)
  *   GET  /health         -> liveness probe (also the client's server detector)
  */
 import { handlePokerSocket } from "./src/poker-server.ts";
+import { handleStatsRequest } from "./src/poker-stats.ts";
 
 const STATIC_DIR = new URL("./static/", import.meta.url);
 const SRC_DIR = new URL("./src/", import.meta.url);
@@ -76,6 +78,10 @@ async function handler(req: Request): Promise<Response> {
 
   if (req.method === "GET" && pathname === "/api/poker/ws") {
     return handlePokerSocket(req);
+  }
+
+  if (req.method === "GET" && pathname === "/api/poker/stats") {
+    return handleStatsRequest(req);
   }
 
   if (req.method === "GET" || req.method === "HEAD") {
