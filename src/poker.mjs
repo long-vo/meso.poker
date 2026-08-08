@@ -357,6 +357,87 @@ export function computeStats(room) {
 }
 
 /**
+ * Deck distance between two cards, in deck positions — the deck's numeric run
+ * is ordered, so "how many steps apart" is a better measure of disagreement
+ * than the arithmetic gap (13 vs 20 is one step; 3 vs 8 is two).
+ * @param {string} a
+ * @param {string} b
+ * @returns {number}
+ */
+function deckDistance(a, b) {
+  return Math.abs(DECK.indexOf(a) - DECK.indexOf(b));
+}
+
+/**
+ * A one-line reading of a revealed round: what the spread actually means, so
+ * every outcome that isn't unanimous stops looking alike. Derived purely from
+ * `computeStats` output, so the client can call it on `publicState().stats`.
+ *
+ * A majority of "☕" or "?" outranks consensus: an all-"?" round is unanimous,
+ * but "nobody understands this yet" is the useful thing to say about it.
+ * @param {ReturnType<typeof computeStats>} stats
+ * @returns {{ id: string, emoji: string, label: string, tone: string } | null}
+ */
+export function roundVerdict(stats) {
+  if (!stats || stats.votes < 2) return null;
+  /** @param {string} card */
+  const count = (card) => stats.distribution.find((d) => d.card === card)?.count ?? 0;
+  // Strictly more than half — with two voters, one "☕" is not the room's mood.
+  /** @param {string} card */
+  const majority = (card) => count(card) * 2 > stats.votes;
+  if (majority("☕")) {
+    return { id: "coffee", emoji: "☕", label: "Break?", tone: "info" };
+  }
+  if (majority("?")) {
+    return { id: "unclear", emoji: "🤷", label: "Nobody understands this one yet", tone: "warn" };
+  }
+  if (stats.consensus) {
+    return { id: "consensus", emoji: "🎯", label: "Perfect call", tone: "good" };
+  }
+  const numeric = stats.distribution.filter((d) => cardValue(d.card) !== null);
+  const numericVotes = numeric.reduce((n, d) => n + d.count, 0);
+  if (numericVotes < 2) return null;
+  const spread = deckDistance(numeric[0].card, numeric[numeric.length - 1].card);
+  if (spread === 0) {
+    return { id: "agreed", emoji: "👍", label: "Agreed on the numbers", tone: "good" };
+  }
+  if (spread === 1) {
+    return { id: "close", emoji: "🤏", label: "Close enough — take the higher", tone: "good" };
+  }
+  if (spread === 2) {
+    return { id: "near", emoji: "🫱", label: "Nearly there", tone: "info" };
+  }
+  return { id: "wide", emoji: "↔️", label: "Wide spread — talk it out", tone: "warn" };
+}
+
+/**
+ * The two ends of a revealed round: who went highest and who went lowest. This
+ * is the pair a team actually talks to, so it is worth naming.
+ *
+ * Takes the participant list as `publicState` projects it (votes are only
+ * populated there once the round is revealed). Null unless the ends are at
+ * least two deck positions apart — 3 vs 5 is agreement, not an outlier.
+ * @param {{ name: string, vote: string | null, observer?: boolean }[]} participants
+ * @returns {{ high: { card: string, names: string[] }, low: { card: string, names: string[] } } | null}
+ */
+export function roundOutliers(participants) {
+  const voted = (participants ?? []).filter((p) =>
+    !p.observer && p.vote !== null && cardValue(p.vote) !== null
+  );
+  if (voted.length < 2) return null;
+  const positions = voted.map((p) => DECK.indexOf(/** @type {string} */ (p.vote)));
+  const high = DECK[Math.max(...positions)];
+  const low = DECK[Math.min(...positions)];
+  if (deckDistance(high, low) < 2) return null;
+  /** @param {string} card */
+  const namesOn = (card) => voted.filter((p) => p.vote === card).map((p) => p.name);
+  return {
+    high: { card: high, names: namesOn(high) },
+    low: { card: low, names: namesOn(low) },
+  };
+}
+
+/**
  * The per-viewer projection of a room that is safe to send over the wire:
  * before the reveal, other participants' card values are replaced by a
  * "voted" flag; your own vote is always echoed back so the UI can render it.

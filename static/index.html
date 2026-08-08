@@ -47,6 +47,8 @@
         <label for="player-name">Your name</label>
         <input id="player-name" type="text" maxlength="24" autocomplete="off" spellcheck="false"
           placeholder="e.g. Long" />
+        <p class="hint">Want an emoji next to your name? Copy your favourite from
+          <a href="https://getemoji.com/" target="_blank" rel="noopener">getemoji.com</a>.</p>
       </div>
 
       <div class="field">
@@ -158,6 +160,9 @@
         <div id="players" class="players"></div>
         <div class="results-row">
           <div id="results" class="results"></div>
+        </div>
+        <div class="session-row">
+          <div id="session-strip" class="session-strip" role="status" aria-live="polite" hidden></div>
           <div id="reactions" class="reactions" role="group" aria-label="Send a reaction"
             title="Everyone in the room sees your reaction"></div>
         </div>

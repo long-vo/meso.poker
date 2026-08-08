@@ -5,6 +5,7 @@
 import {
   applyEvent,
   CARD_THEMES,
+  cardValue,
   CODE_PATTERN,
   createRoom,
   DECK,
@@ -13,6 +14,8 @@ import {
   LIMITS,
   publicState,
   REACTIONS,
+  roundOutliers,
+  roundVerdict,
   sanitizeNotes,
   sanitizePin,
   sanitizeWheelNames,
@@ -89,6 +92,7 @@ const els = {
   themesPanel: $("themes-panel"),
   reactions: $("reactions"),
   reactionLayer: $("reaction-layer"),
+  sessionStrip: $("session-strip"),
   nudgeNotify: $("nudge-notify"),
   controlsToggle: $("controls-toggle"),
   tableSide: $("table-side"),
@@ -478,10 +482,11 @@ function sendReaction(emoji) {
 /** Float an emoji up over the players panel; the sender's name tags along. */
 function floatReaction(emoji, name) {
   if (!REACTIONS.includes(emoji)) return;
-  // A stampede can't flood the DOM: the oldest balloon pops early.
-  if (els.reactionLayer.childElementCount >= 30) {
-    els.reactionLayer.firstElementChild?.remove();
-  }
+  // A stampede can't flood the DOM: the oldest balloon pops early. Count
+  // balloons, not layer children — confetti shares this layer and must not be
+  // popped by someone spamming reactions through a celebration.
+  const floats = els.reactionLayer.querySelectorAll(".reaction-float");
+  if (floats.length >= 30) floats[0].remove();
   const float = document.createElement("span");
   float.className = "reaction-float";
   float.style.left = `${8 + Math.random() * 76}%`;
@@ -497,6 +502,38 @@ function floatReaction(emoji, name) {
   // Removal is timer-based, not animationend: reduced-motion swaps the
   // animation for a plain fade and the node must still go away.
   setTimeout(() => float.remove(), REACTION_FLOAT_MS);
+}
+
+/* ------------------------------- confetti -------------------------------- */
+
+const CONFETTI_PIECES = 26;
+const CONFETTI_MS = 2600; // outlives the longest fall (delay + duration)
+/* Themed variables, so the burst follows dark/light like everything else. */
+const CONFETTI_COLORS = ["--accent", "--accent-2", "--good", "--warn", "--mask"];
+
+/**
+ * Consensus is the round's win, so give it one. Plain spans in the reaction
+ * layer — it already sits over the players grid, ignores pointer events and
+ * clips at the panel edge, so the burst needs no canvas and no new plumbing.
+ * Skipped outright under reduced motion: falling paper is all motion, and the
+ * verdict chip still says what happened.
+ */
+function burstConfetti() {
+  if (matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+  for (let i = 0; i < CONFETTI_PIECES; i++) {
+    const piece = document.createElement("i");
+    piece.className = "confetti";
+    piece.style.left = `${4 + Math.random() * 92}%`;
+    piece.style.background = `var(${CONFETTI_COLORS[i % CONFETTI_COLORS.length]})`;
+    piece.style.animationDelay = `${(Math.random() * 0.4).toFixed(2)}s`;
+    piece.style.animationDuration = `${(1.4 + Math.random() * 0.8).toFixed(2)}s`;
+    piece.style.setProperty("--drift", `${Math.round(Math.random() * 90 - 45)}px`);
+    piece.style.setProperty("--spin", `${Math.round(Math.random() * 720 - 360)}deg`);
+    els.reactionLayer.appendChild(piece);
+    // Timer-based like the balloons, so a piece still goes away if its
+    // animation never fires (background tab, animations disabled).
+    setTimeout(() => piece.remove(), CONFETTI_MS);
+  }
 }
 
 function sendNudge(name) {
@@ -902,6 +939,133 @@ function addNote() {
   els.noteText.focus();
 }
 
+/* ---------------------------- session recap ------------------------------ */
+/* Nothing in a room survives `reset`, so a session of good estimating leaves no
+   trace at all. Log each finished round locally — same storage shape as the
+   notes cache — and show what the session has produced so far.
+   Local by design: this is one browser's view, so a late joiner starts empty
+   and the room never has to carry (or gossip) a growing history. */
+
+const SESSION_MAX = 60;
+/* Room codes get recycled, so a log nobody has touched in half a day belongs to
+   last week's QK7M, not this one. Start over rather than resume it. */
+const SESSION_STALE_MS = 12 * 60 * 60_000;
+const sessionStoreKey = (code) => `meso-poker-session-${code}`;
+
+/** @type {{ story: string, card: string | null, consensus: boolean, at: number }[]} */
+let sessionLog = [];
+/** Repaint key, so the strip isn't rebuilt on every vote (see renderSession). */
+let sessionPaintKey = "";
+
+function loadSessionLog(code) {
+  sessionLog = [];
+  try {
+    const raw = JSON.parse(localStorage.getItem(sessionStoreKey(code)) ?? "[]");
+    if (!Array.isArray(raw)) return;
+    const rounds = raw.filter((r) =>
+      r && typeof r === "object" && typeof r.consensus === "boolean" &&
+      (typeof r.card === "string" || r.card === null) && Number.isFinite(r.at)
+    );
+    const last = rounds[rounds.length - 1];
+    if (last && Date.now() - last.at < SESSION_STALE_MS) sessionLog = rounds.slice(-SESSION_MAX);
+  } catch {
+    /* unreadable or disabled storage: an empty session is a fine fallback */
+  }
+}
+
+function saveSessionLog() {
+  if (!session) return;
+  try {
+    localStorage.setItem(sessionStoreKey(session.code), JSON.stringify(sessionLog));
+  } catch {
+    /* fine — the strip still works for this tab */
+  }
+}
+
+/**
+ * The card a round landed on: the most-voted one, ties going to the higher card
+ * (a team split between 5 and 8 commits to 8). "?" and "☕" are excluded — they
+ * are abstentions, so an all-"?" round banks a round but no points.
+ */
+function agreedCard(stats) {
+  let best = null;
+  // `distribution` arrives in deck order, so a later entry at the same count is
+  // the higher card and simply wins the tie.
+  for (const entry of stats.distribution) {
+    if (cardValue(entry.card) === null) continue;
+    if (!best || entry.count >= best.count) best = entry;
+  }
+  return best?.card ?? null;
+}
+
+function recordRound(state) {
+  if (!session || !state.stats || state.stats.votes === 0) return;
+  sessionLog.push({
+    story: state.story,
+    card: agreedCard(state.stats),
+    // "The team nailed it" is the verdict's notion, not `stats.consensus`:
+    // a unanimous "☕" is technically consensus but must not build a streak.
+    consensus: roundVerdict(state.stats)?.id === "consensus",
+    at: Date.now(),
+  });
+  if (sessionLog.length > SESSION_MAX) sessionLog = sessionLog.slice(-SESSION_MAX);
+  saveSessionLog();
+}
+
+/** Consensus rounds counted back from the latest — the run that is still alive. */
+function currentStreak() {
+  let streak = 0;
+  for (let i = sessionLog.length - 1; i >= 0 && sessionLog[i].consensus; i--) streak++;
+  return streak;
+}
+
+function sessionPoints() {
+  const total = sessionLog.reduce((sum, r) => sum + (cardValue(r.card ?? "") ?? 0), 0);
+  return Math.round(total * 10) / 10;
+}
+
+function renderSession() {
+  // Cheap guard: the strip only moves when a round lands, but render() runs on
+  // every vote.
+  const key = `${session?.code ?? ""}:${sessionLog.length}`;
+  if (key === sessionPaintKey) return;
+  sessionPaintKey = key;
+  const rounds = sessionLog.length;
+  if (rounds === 0) {
+    els.sessionStrip.hidden = true;
+    els.sessionStrip.innerHTML = "";
+    return;
+  }
+  const parts = [
+    `<span class="session-label">This session</span>`,
+    `<span class="session-stat"><b>${rounds}</b> ${rounds === 1 ? "round" : "rounds"}</span>`,
+  ];
+  // One consensus is luck; two in a row is a team finding its rhythm.
+  const streak = currentStreak();
+  if (streak >= 2) parts.push(`<span class="session-streak">🔥 ${streak} in a row</span>`);
+  els.sessionStrip.innerHTML = parts.join("");
+  els.sessionStrip.hidden = false;
+  // The rounds themselves live in the tooltip rather than the strip, which has
+  // to share a narrow panel with the players grid.
+  els.sessionStrip.title = sessionLog
+    .slice(-10)
+    .map((r) => `${r.card ?? "—"}  ${r.story || "(no story)"}`)
+    .join("\n");
+}
+
+/** One-line farewell shown on leave; "" when the session estimated nothing. */
+function sessionSummary() {
+  if (sessionLog.length === 0) return "";
+  let best = 0;
+  let run = 0;
+  for (const round of sessionLog) {
+    run = round.consensus ? run + 1 : 0;
+    if (run > best) best = run;
+  }
+  const rounds = `${sessionLog.length} round${sessionLog.length === 1 ? "" : "s"}`;
+  return `${rounds} · ${sessionPoints()} pts` + (best >= 2 ? ` · best streak ${best}` : "");
+}
+
 /* ------------------------------- rendering ------------------------------- */
 
 function buildDeck() {
@@ -922,8 +1086,11 @@ function buildDeck() {
   }
 }
 
-function renderPlayers(state) {
+function renderPlayers(state, justRevealed = false) {
   els.players.innerHTML = "";
+  // Position in the grid, which drives the reveal cascade's stagger. Not the
+  // participant index: observers are skipped, and a gap would stall the wave.
+  let seat = 0;
   // Observers (PO) watch from outside: they appear neither in the players
   // grid nor on the wheel.
   for (const p of state.participants) {
@@ -953,6 +1120,13 @@ function renderPlayers(state) {
     }
     if (state.revealed) {
       card.classList.add("face");
+      // The cascade plays only on the push that revealed the round: this grid
+      // is rebuilt on every state push, so without the gate an unrelated join
+      // or status change would replay the whole flip mid-discussion.
+      if (justRevealed) {
+        card.classList.add("flip");
+        card.style.setProperty("--seat", String(seat));
+      }
       if (p.vote === null) {
         card.classList.add("no-vote");
         card.textContent = "—";
@@ -993,6 +1167,7 @@ function renderPlayers(state) {
       wrap.appendChild(badge);
     }
     els.players.appendChild(wrap);
+    seat++;
   }
 
   // Every other panel shows an empty state; give the core panel one too. When
@@ -1109,8 +1284,33 @@ function renderResults(state) {
         `<span class="dist-chip__count">${count}</span></span>`,
     );
   }
-  if (stats.consensus) parts.push(`<span class="consensus">✨ Consensus!</span>`);
+  // One line on what the spread means. Every non-unanimous round used to render
+  // identically; the verdict is the sentence a team actually acts on.
+  const verdict = roundVerdict(stats);
+  if (verdict) {
+    parts.push(
+      `<span class="verdict verdict--${verdict.tone}">` +
+        `<span aria-hidden="true">${verdict.emoji}</span> ${escapeHtml(verdict.label)}</span>`,
+    );
+  }
+  // Name both ends of a real spread — that pair is the discussion.
+  const outliers = roundOutliers(state.participants);
+  if (outliers) {
+    parts.push(
+      outlierChip("high", "▲", outliers.high) + outlierChip("low", "▼", outliers.low),
+    );
+  }
   els.results.innerHTML = parts.join("");
+}
+
+/** "▲ Ana & Ben 13" — the third and later names collapse into a "+n" tail. */
+function outlierChip(kind, arrow, end) {
+  const names = end.names.length <= 2
+    ? end.names.join(" & ")
+    : `${end.names[0]} +${end.names.length - 1}`;
+  return `<span class="outlier outlier--${kind}">` +
+    `<span class="outlier__arrow" aria-hidden="true">${arrow}</span>` +
+    `${escapeHtml(names)} <b>${escapeHtml(end.card)}</b></span>`;
 }
 
 /* ------------------------------ name wheel ------------------------------ */
@@ -1324,18 +1524,34 @@ function renderWheel(state) {
 let nudgedThisRound = false;
 
 function render(state) {
+  const previous = lastState;
   lastState = state;
+
+  // The reveal is the round's peak, and it lands on exactly one state push:
+  // the one where `revealed` turns true. The flip cascade, the confetti and the
+  // session log all key off that edge. A first frame (no previous state — a
+  // fresh join, or a reconnect onto an already-revealed round) is history
+  // rather than a reveal, so it stays quiet.
+  const justRevealed = state.revealed && previous !== null && !previous.revealed;
 
   // Never clobber a story the user is currently typing.
   if (document.activeElement !== els.story && els.story.value !== state.story) {
     els.story.value = state.story;
   }
 
-  renderPlayers(state);
+  if (justRevealed) {
+    recordRound(state);
+    // Keyed off the verdict rather than `stats.consensus`: a room that all
+    // voted "☕" is unanimous, but "Break?" is not a moment for confetti.
+    if (roundVerdict(state.stats)?.id === "consensus") burstConfetti();
+  }
+
+  renderPlayers(state, justRevealed);
   renderResults(state);
   renderObservers(state);
   renderWheel(state);
   renderNotes(state);
+  renderSession();
 
   const mine = state.participants.find((p) => p.you);
   const observing = mine?.observer === true;
@@ -1567,6 +1783,10 @@ function joinRoom(code, pinArg) {
   session = { code, name, pin, transport };
   notesSeedChecked = false;
   lastNotesAt = -1;
+  // Resume this room's round log (a reload mid-session shouldn't lose the run).
+  loadSessionLog(code);
+  sessionPaintKey = "";
+  renderSession();
   els.noteDate.value = todayStr();
   els.roomChip.textContent = code;
   els.join.hidden = true;
@@ -1578,9 +1798,15 @@ function joinRoom(code, pinArg) {
 }
 
 function leaveRoom() {
+  // Send the session off with what it produced — read before the log is cleared.
+  const farewell = sessionSummary();
   session?.transport.close();
   session = null;
   lastState = null;
+  sessionLog = [];
+  sessionPaintKey = "";
+  els.sessionStrip.hidden = true;
+  els.sessionStrip.innerHTML = "";
   els.table.hidden = true;
   els.join.hidden = false;
   els.controlsToggle.hidden = true;
@@ -1608,6 +1834,9 @@ function leaveRoom() {
   setConn(null);
   history.replaceState(null, "", location.pathname);
   els.roomCode.focus();
+  // Empty when the room estimated nothing — including the error paths above,
+  // which bounce back to the join form before any round ever lands.
+  if (farewell) showToast(`🃏 ${farewell}`);
 }
 
 /* --------------------------------- wire --------------------------------- */

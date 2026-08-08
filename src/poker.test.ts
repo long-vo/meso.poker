@@ -16,6 +16,8 @@ import {
   LIMITS,
   mergeRooms,
   publicState,
+  roundOutliers,
+  roundVerdict,
   sanitizeNotes,
   sanitizePin,
   sanitizeWheelNames,
@@ -185,6 +187,77 @@ Deno.test("stats: consensus requires 2+ identical votes; ?-only rounds have no s
   applyEvent(solo, { type: "vote", id: "p1", value: "?" });
   assertEquals(computeStats(solo).consensus, false, "one vote is not consensus");
   assertEquals(computeStats(solo).sum, null);
+});
+
+function verdictOf(votes: (string | null)[]) {
+  const room = roomWith(...votes.map((_, i) => `P${i}`));
+  votes.forEach((value, i) => applyEvent(room, { type: "vote", id: `p${i + 1}`, value }));
+  return roundVerdict(computeStats(room))?.id ?? null;
+}
+
+Deno.test("roundVerdict: a majority of ☕ or ? outranks unanimity", () => {
+  assertEquals(verdictOf(["☕", "☕", "5"]), "coffee");
+  assertEquals(verdictOf(["☕", "☕", "☕"]), "coffee", "unanimous ☕ still reads as a break");
+  assertEquals(verdictOf(["?", "?", "?"]), "unclear", "unanimous ? is confusion, not consensus");
+  assertEquals(verdictOf(["☕", "5"]), null, "half is not a majority");
+  assertEquals(verdictOf(["?", "8"]), null);
+});
+
+Deno.test("roundVerdict: spread is measured in deck positions", () => {
+  assertEquals(verdictOf(["5", "5"]), "consensus");
+  assertEquals(verdictOf(["5", "5", "?"]), "agreed", "the numbers agree, a ? abstains");
+  assertEquals(verdictOf(["3", "5"]), "close", "adjacent deck cards");
+  assertEquals(verdictOf(["13", "20"]), "close", "an 7-point gap is still one deck step");
+  assertEquals(verdictOf(["3", "8"]), "near");
+  assertEquals(verdictOf(["2", "13"]), "wide");
+  assertEquals(verdictOf(["0", "100"]), "wide");
+});
+
+Deno.test("roundVerdict: quiet when there is nothing to read", () => {
+  assertEquals(verdictOf(["5"]), null, "one vote is not a round");
+  assertEquals(verdictOf([]), null);
+  assertEquals(verdictOf(["?", "☕"]), null, "no numbers and no majority");
+  assertEquals(roundVerdict(computeStats(roomWith("Ana"))), null, "nobody voted");
+});
+
+Deno.test("roundOutliers names both ends once the spread is real", () => {
+  const room = roomWith("Ana", "Ben", "Cid", "Dee");
+  applyEvent(room, { type: "vote", id: "p1", value: "2" });
+  applyEvent(room, { type: "vote", id: "p2", value: "13" });
+  applyEvent(room, { type: "vote", id: "p3", value: "13" });
+  applyEvent(room, { type: "vote", id: "p4", value: "☕" });
+  applyEvent(room, { type: "reveal" });
+  assertEquals(roundOutliers(publicState(room, "p1").participants), {
+    high: { card: "13", names: ["Ben", "Cid"] },
+    low: { card: "2", names: ["Ana"] },
+  });
+});
+
+Deno.test("roundOutliers stays silent on agreement and on hidden votes", () => {
+  const close = roomWith("Ana", "Ben");
+  applyEvent(close, { type: "vote", id: "p1", value: "3" });
+  applyEvent(close, { type: "vote", id: "p2", value: "5" });
+  applyEvent(close, { type: "reveal" });
+  assertEquals(roundOutliers(publicState(close, "p1").participants), null, "one deck step apart");
+
+  const hidden = roomWith("Ana", "Ben");
+  applyEvent(hidden, { type: "vote", id: "p1", value: "2" });
+  applyEvent(hidden, { type: "vote", id: "p2", value: "40" });
+  assertEquals(roundOutliers(publicState(hidden, "p1").participants), null, "before reveal");
+  assertEquals(roundOutliers([]), null);
+});
+
+Deno.test("roundOutliers ignores observers and non-numeric cards", () => {
+  const room = createRoom();
+  applyEvent(room, { type: "join", id: "a", name: "Ana", at: 1 });
+  applyEvent(room, { type: "join", id: "b", name: "Ben", at: 2 });
+  applyEvent(room, { type: "join", id: "o", name: "Ozzy", observer: true, at: 3 });
+  applyEvent(room, { type: "vote", id: "a", value: "1" });
+  applyEvent(room, { type: "vote", id: "b", value: "8" });
+  applyEvent(room, { type: "vote", id: "o", value: "100" });
+  applyEvent(room, { type: "reveal" });
+  const out = roundOutliers(publicState(room, "a").participants);
+  assertEquals(out, { high: { card: "8", names: ["Ben"] }, low: { card: "1", names: ["Ana"] } });
 });
 
 Deno.test("publicState hides other votes until reveal, always echoes your own", () => {
