@@ -39,13 +39,75 @@ function roomWith(...names: string[]) {
   return room;
 }
 
-Deno.test("join adds participants; duplicates and blanks are ignored", () => {
+Deno.test("join adds participants; blanks are ignored", () => {
   const room = createRoom();
   assertEquals(applyEvent(room, { type: "join", id: "a", name: "  Long  " }), true);
   assertEquals(room.participants["a"].name, "Long");
-  assertEquals(applyEvent(room, { type: "join", id: "a", name: "Again" }), false, "duplicate id");
   assertEquals(applyEvent(room, { type: "join", id: "b", name: "   " }), false, "blank name");
   assertEquals(applyEvent(room, { type: "join", id: "", name: "NoId" }), false, "missing id");
+});
+
+Deno.test("a rejoin with a known id reclaims the seat instead of adding a row", () => {
+  const room = roomWith("Long", "Mai");
+  applyEvent(room, { type: "vote", id: "p1", value: "5" });
+  // Long's socket dies without a close; the browser redials with the same id.
+  assertEquals(applyEvent(room, { type: "join", id: "p1", name: "Long", at: 99 }), true);
+  assertEquals(Object.keys(room.participants).sort(), ["p1", "p2"], "no second row");
+  assertEquals(room.participants["p1"].vote, "5", "the vote survives the reconnect");
+  assertEquals(room.participants["p1"].joinedAt, 0, "the seat keeps its place at the table");
+  assertEquals(room.participants["p1"].connectedAt, 99, "but the connection is fresh");
+});
+
+Deno.test("a reclaim carries presence over and updates name, theme and role", () => {
+  const room = roomWith("Long");
+  applyEvent(room, { type: "status", id: "p1", status: "break" });
+  applyEvent(room, { type: "vote", id: "p1", value: "8" });
+  applyEvent(room, { type: "join", id: "p1", name: "Long V.", theme: "ruby", at: 7 });
+  assertEquals(room.participants["p1"].name, "Long V.");
+  assertEquals(room.participants["p1"].theme, "ruby");
+  assertEquals(room.participants["p1"].status, "break", "a blip doesn't end a coffee break");
+  // Coming back as an observer must drop the vote — computeStats counts every
+  // non-null vote, observer or not.
+  applyEvent(room, { type: "join", id: "p1", name: "Long", observer: true, at: 8 });
+  assertEquals(room.participants["p1"].observer, true);
+  assertEquals(room.participants["p1"].vote, null, "an observer holds no card");
+});
+
+Deno.test("a full room still lets its own players back in", () => {
+  const room = createRoom();
+  for (let i = 0; i < LIMITS.participants; i++) {
+    applyEvent(room, { type: "join", id: `p${i}`, name: `P${i}`, at: i });
+  }
+  assertEquals(applyEvent(room, { type: "join", id: "newcomer", name: "Nope" }), false);
+  assertEquals(applyEvent(room, { type: "join", id: "p0", name: "P0", at: 999 }), true);
+  assertEquals(Object.keys(room.participants).length, LIMITS.participants);
+});
+
+Deno.test("a reclaim is gated by the room PIN like any other join", () => {
+  const room = createRoom();
+  applyEvent(room, { type: "join", id: "p1", name: "Long", password: "1234" });
+  assertEquals(
+    applyEvent(room, { type: "join", id: "p1", name: "Long", password: "9999" }),
+    false,
+    "wrong PIN cannot reclaim",
+  );
+  assertEquals(
+    applyEvent(room, { type: "join", id: "p1", name: "Long", password: "1234", at: 5 }),
+    true,
+  );
+});
+
+Deno.test("mergeRooms collapses a seat two isolates both claim, newest wins", () => {
+  // Long reconnected onto isolate B; isolate A still holds the dead socket.
+  const stale = createRoom();
+  applyEvent(stale, { type: "join", id: "long", name: "Long", at: 1 });
+  applyEvent(stale, { type: "vote", id: "long", value: "3" });
+  const fresh = createRoom();
+  applyEvent(fresh, { type: "join", id: "long", name: "Long", at: 20 });
+  applyEvent(fresh, { type: "vote", id: "long", value: "13" });
+  assertEquals(Object.keys(mergeRooms(stale, [fresh]).participants), ["long"], "one row");
+  assertEquals(mergeRooms(stale, [fresh]).participants["long"].vote, "13", "fresh wins");
+  assertEquals(mergeRooms(fresh, [stale]).participants["long"].vote, "13", "either direction");
 });
 
 Deno.test("join truncates long names and enforces the participant cap", () => {

@@ -66,7 +66,10 @@ export function isAway(status) {
 }
 
 /**
- * @typedef {{ name: string, vote: string | null, joinedAt: number, theme: string, observer: boolean, status: string }} Participant
+ * `joinedAt` fixes the seat order and survives reconnects; `connectedAt` is
+ * bumped by every (re)join and only breaks ties when two isolates report the
+ * same participant — the fresher connection wins.
+ * @typedef {{ name: string, vote: string | null, joinedAt: number, connectedAt: number, theme: string, observer: boolean, status: string }} Participant
  * @typedef {{ date: string, text: string, who: string, at: number }} Note
  * @typedef {{
  *   participants: Record<string, Participant>,
@@ -206,15 +209,22 @@ export function cardValue(card) {
  */
 export function applyEvent(room, event) {
   switch (event.type) {
+    // A join carrying an id the room already knows is a *reclaim*, not a
+    // duplicate: the same person's socket dropped and came back. Clients hold a
+    // stable per-tab id, so the seat — vote, position, presence — is picked up
+    // where it was left instead of a second row appearing next to the ghost.
     case "join": {
       const id = String(event.id ?? "");
       const name = String(event.name ?? "").trim().slice(0, LIMITS.name);
-      if (!id || !name || room.participants[id]) return false;
-      if (Object.keys(room.participants).length >= LIMITS.participants) return false;
+      if (!id || !name) return false;
+      const existing = room.participants[id];
+      // The cap counts seats, so reclaiming one is allowed in a full room.
+      if (!existing && Object.keys(room.participants).length >= LIMITS.participants) return false;
       // Password gate. A room's PIN is fixed by whoever initialises it: an
       // uninitialised room (password null) adopts this join's PIN — "" when the
       // creator set none, leaving the room open — and locks it in. Every later
-      // join to a protected room must supply the matching PIN.
+      // join to a protected room must supply the matching PIN. A reclaim is a
+      // fresh connection, so it is gated exactly like a first join.
       const pin = sanitizePin(event.password);
       if (room.password === null) {
         room.password = pin;
@@ -224,10 +234,24 @@ export function applyEvent(room, event) {
       const theme = CARD_THEMES.includes(String(event.theme))
         ? String(event.theme)
         : CARD_THEMES[0];
+      const at = event.at ?? Date.now();
+      if (existing) {
+        // Name, theme and role can change between connections; the vote, the
+        // seat order and the presence status carry over — a wifi blip is not a
+        // reason to lose your card or to stop being away.
+        existing.name = name;
+        existing.theme = theme;
+        existing.observer = event.observer === true;
+        // An observer holding a vote would still be counted by computeStats.
+        if (existing.observer) existing.vote = null;
+        existing.connectedAt = at;
+        return true;
+      }
       room.participants[id] = {
         name,
         vote: null,
-        joinedAt: event.at ?? Date.now(),
+        joinedAt: at,
+        connectedAt: at,
         theme,
         // Observers (e.g. the product owner) watch and reveal but never vote.
         observer: event.observer === true,
@@ -495,8 +519,12 @@ export function publicState(room, selfId) {
 /**
  * Merge this isolate's room with snapshots gossiped by sibling isolates
  * (on Deno Deploy, sockets for one room may land on different isolates).
- * Participant maps are disjoint — each participant is owned by the isolate
- * holding its socket — and the shared flags resolve by last-writer-wins.
+ * Participant maps are normally disjoint — each participant is owned by the
+ * isolate holding its socket — but a reconnect onto a different isolate is
+ * briefly claimed by both, until the old one notices its socket is dead. Since
+ * clients keep a stable id, those two claims share a key and collapse to one
+ * row here, the fresher `connectedAt` winning so a stale snapshot cannot
+ * resurrect an old vote. Shared flags resolve by last-writer-wins.
  * Returns a new room; inputs are not modified.
  * @param {Room} local
  * @param {Room[]} remotes
@@ -519,7 +547,12 @@ export function mergeRooms(local, remotes) {
     password: local.password,
   };
   for (const remote of remotes) {
-    Object.assign(merged.participants, remote.participants);
+    for (const [id, participant] of Object.entries(remote.participants)) {
+      const mine = merged.participants[id];
+      if (!mine || (participant.connectedAt ?? 0) > (mine.connectedAt ?? 0)) {
+        merged.participants[id] = participant;
+      }
+    }
     // Adopt a sibling's PIN when this isolate hasn't been initialised yet, so a
     // joiner landing on a fresh isolate is still gated by the creator's PIN.
     if (merged.password === null && remote.password !== null) {

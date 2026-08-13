@@ -186,6 +186,29 @@ function setConn(state) {
 /* ------------------------------ transports ------------------------------ */
 
 /**
+ * Stable identity for this tab, sent as `?cid=` so a reconnect reclaims its
+ * seat instead of joining as a second player (the server keys participants by
+ * it; see the `join` reclaim branch in poker.mjs).
+ *
+ * sessionStorage is exactly the right scope: it survives a reload and every
+ * dropped socket, but each tab gets its own — so two tabs remain two players,
+ * as they are today. When storage is blocked the id still lives as long as the
+ * page does, which already covers reconnects; only a reload loses the seat.
+ */
+const CLIENT_ID = (() => {
+  const KEY = "meso-poker-cid";
+  try {
+    const saved = sessionStorage.getItem(KEY);
+    if (saved) return saved;
+    const id = crypto.randomUUID();
+    sessionStorage.setItem(KEY, id);
+    return id;
+  } catch {
+    return crypto.randomUUID();
+  }
+})();
+
+/**
  * Live transport: WebSocket to the Deno server, with automatic reconnects.
  *
  * A `GET /health` probe runs first: on static hosting (GitHub Pages) it
@@ -214,6 +237,7 @@ function connectLive(code, name, observer, pin, handlers) {
     socket = new WebSocket(
       `${proto}://${location.host}/api/poker/ws?room=${code}` +
         `&name=${encodeURIComponent(name)}&theme=${encodeURIComponent(currentTheme())}` +
+        `&cid=${encodeURIComponent(CLIENT_ID)}` +
         (observer ? "&observer=1" : "") +
         (pin ? `&pin=${encodeURIComponent(pin)}` : ""),
     );
@@ -1281,7 +1305,7 @@ function renderResults(state) {
     const top = count === maxCount && maxCount > 0 ? " dist-chip--top" : "";
     parts.push(
       `<span class="tag dist-chip${top}"><span>${escapeHtml(card)}${unit}</span>` +
-        `<span class="dist-chip__count">${count}</span></span>`,
+        `<span class="dist-chip__count">x${count}</span></span>`,
     );
   }
   // One line on what the spread means. Every non-unanimous round used to render

@@ -15,6 +15,12 @@
   --good: #3fb950;
   --warn: #d29922;
   --on-warn: #fff;
+  /* Fill for the winning distribution chip. Full-strength --warn is a floodlight
+     against the dark panel, and white-on-gold only reaches 2.5:1 — under AA —
+     which also flattens the count pill sitting inside it. Muting the gold into
+     the surface fixes all three at once. Light mode's --warn is already dark
+     enough to use neat, so it overrides this below. */
+  --chip-top-bg: color-mix(in srgb, var(--warn) 55%, var(--bg-elev));
   --danger: #f85149;
   --mask: #f0a35e;
   --player: #45c4b0;
@@ -40,6 +46,7 @@
   --good: #1a7f37;
   --warn: #9a6700;
   --on-warn: #fff;
+  --chip-top-bg: var(--warn);
   --danger: #cf222e;
   --mask: #b8620f;
   --player: #0f8a7a;
@@ -620,17 +627,20 @@ body {
   color: inherit;
   background: color-mix(in srgb, currentColor 15%, transparent);
 }
-/* The most-chosen card(s) after reveal: a solid gold "winner" fill. Ties share
-   it. `--on-warn` keeps the text white on the gold in both themes; the count
-   pill re-tints from `currentColor` to match. */
+/* The most-chosen card(s) after reveal: a gold "winner" fill. Ties share it.
+   The border stays full-strength --warn so the chip still reads as the winner
+   even where the fill is muted (see --chip-top-bg). `--on-warn` keeps the text
+   white on the gold in both themes; the count pill re-tints from `currentColor`
+   to match, a little stronger than on a plain chip so it stays legible against
+   the fill rather than washing into it. */
 .dist-chip--top {
   border-color: var(--warn);
-  background: var(--warn);
+  background: var(--chip-top-bg);
   color: var(--on-warn);
   font-weight: 500;
 }
 .dist-chip--top .dist-chip__count {
-  background: color-mix(in srgb, currentColor 22%, transparent);
+  background: color-mix(in srgb, currentColor 30%, transparent);
 }
 .consensus {
   color: var(--good);

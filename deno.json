@@ -5,8 +5,8 @@
   "tasks": {
     "start": "deno run --unstable-kv --allow-net --allow-read --allow-write --allow-env main.ts",
     "dev": "PORT=8001 deno run --unstable-kv --allow-net --allow-read --allow-write --allow-env --watch main.ts",
-    "test": "deno test --allow-read",
-    "check": "deno check main.ts src/poker.test.ts src/poker-stats.test.ts",
+    "test": "deno test --allow-read --allow-net",
+    "check": "deno check main.ts src/poker.test.ts src/poker-stats.test.ts src/poker-server.test.ts",
     "fmt": "deno fmt",
     "lint": "deno lint"
   },

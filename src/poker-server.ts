@@ -86,6 +86,7 @@ interface RelayMessage {
 
 const MAX_ROOMS = 500;
 const MAX_MESSAGE_BYTES = 4096;
+const utf8 = new TextEncoder();
 // Reactions/nudges per client within the sliding window; beyond it they're
 // silently dropped so one keyboard-mash can't flood every screen in the room.
 const RELAY_WINDOW_MS = 2_000;
@@ -93,13 +94,26 @@ const RELAY_MAX_PER_WINDOW = 6;
 const REMOTE_TTL_MS = 75_000;
 const HEARTBEAT_MS = 30_000;
 // Clients ping every 25s; a socket silent for 30 min has missed dozens of pings
-// and is presumed dead (closed tab, sleep, dropped network) — close it so the
-// player eventually leaves the room instead of lingering until TCP notices.
-const CLIENT_TIMEOUT_MS = 30 * 60_000;
+// and is presumed dead (closed tab, sleep, dropped network), so `heartbeat`
+// releases its seat rather than waiting on TCP. Exported so tests can position
+// the reaping deadline relative to it.
+export const CLIENT_TIMEOUT_MS = 30 * 60_000;
 const EMPTY_ROOM_TTL_MS = 5 * 60_000;
 
 const isolateId = crypto.randomUUID();
 const rooms = new Map<string, LocalRoom>();
+
+/**
+ * Shape of the client-supplied participant id (`?cid=`): a UUID the browser
+ * keeps for the lifetime of its tab. It is what lets a reconnect reclaim its
+ * seat instead of joining as a second player — see the `join` reclaim branch in
+ * poker.mjs. Unguessable by design (a cid is never sent to other clients, and
+ * `publicState` exposes no ids), so knowing a room code does not let anyone
+ * take over someone else's seat. Anything else — including an older client that
+ * sends no cid at all — falls back to a server-minted id, which simply means no
+ * reclaim for that socket.
+ */
+const CID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 // BroadcastChannel spans isolates on Deno Deploy; locally there are no
 // siblings, so the channel is simply quiet.
@@ -147,17 +161,35 @@ function allowRelay(room: LocalRoom, id: string): boolean {
   return true;
 }
 
+/**
+ * Whether this room has anyone to gossip to. `BroadcastChannel` exists in the
+ * Deno CLI as well, so without this every event would serialise the whole room
+ * into a channel nobody is listening on; on Deno Deploy it would ship the room —
+ * participants, wheel and all notes — to every sibling on every single vote.
+ *
+ * `remotes` is the record of siblings that have actually spoken, and it stays
+ * accurate on its own: a new isolate announces itself with `hello`, which is
+ * exempt below precisely because it is sent while `remotes` is still empty. The
+ * responder has the newcomer in `remotes` by then, so both sides gossip for as
+ * long as — and no longer than — someone is listening.
+ */
+function hasSiblings(room: LocalRoom): boolean {
+  return channel !== null && room.remotes.size > 0;
+}
+
 /** Fan an ephemeral payload out: local sockets now, sibling isolates via the channel. */
 function relay(code: string, room: LocalRoom, payload: RelayPayload): void {
   for (const socket of room.clients.values()) send(socket, payload);
-  if (channel) {
+  if (hasSiblings(room)) {
     const message: RelayMessage = { from: isolateId, room: code, relay: payload };
-    channel.postMessage(message);
+    channel!.postMessage(message);
   }
 }
 
 function broadcast(code: string, room: LocalRoom, extra?: Partial<GossipMessage>): void {
   if (!channel) return;
+  // `hello` is first contact and must go out even with no known siblings.
+  if (!hasSiblings(room) && !extra?.hello) return;
   const message: GossipMessage = { from: isolateId, room: code, state: room.state, ...extra };
   channel.postMessage(message);
 }
@@ -240,22 +272,39 @@ if (channel) {
   };
 }
 
-// Refresh siblings and drop the ones that stopped gossiping (crashed isolates
-// never send a "leave" for their participants).
-setInterval(() => {
-  const cutoff = Date.now() - REMOTE_TTL_MS;
-  const deadline = Date.now() - CLIENT_TIMEOUT_MS;
+/**
+ * One heartbeat pass: reap silent sockets, refresh siblings, and drop the ones
+ * that stopped gossiping (crashed isolates never send a "leave" for their
+ * participants).
+ *
+ * Takes `now` so tests can place the deadline where they need it — the interval
+ * below fires every 30 s and reaps on a 30-minute timeout, and no test can wait
+ * for either.
+ */
+export function heartbeat(now = Date.now()): void {
+  const cutoff = now - REMOTE_TTL_MS;
+  const deadline = now - CLIENT_TIMEOUT_MS;
   for (const [code, room] of rooms) {
     if (room.clients.size === 0) continue;
-    // Reap silent sockets; close() triggers onclose, which emits the leave.
+    // Reap silent sockets. close() is courtesy, not the mechanism: against a
+    // peer that vanished mid-connection the closing handshake never completes —
+    // the socket sits in CLOSING and onclose never fires — so the seat has to be
+    // released here rather than from a callback that is not coming. Leaving it
+    // to onclose pinned the seat *and* the room, which then never emptied and so
+    // never evaporated. A late onclose, if the OS ever times the socket out,
+    // finds the seat already vacated and does nothing (see its ownership guard).
+    let reaped = false;
     for (const [id, socket] of room.clients) {
-      if ((room.seen.get(id) ?? 0) < deadline) {
-        try {
-          socket.close(1001, "timed out");
-        } catch {
-          /* already closing */
-        }
+      if ((room.seen.get(id) ?? 0) >= deadline) continue;
+      try {
+        socket.close(1001, "timed out");
+      } catch {
+        /* already closing */
       }
+      room.clients.delete(id);
+      room.seen.delete(id);
+      room.relayAt.delete(id);
+      if (applyEvent(room.state, { type: "leave", id })) reaped = true;
     }
     broadcast(code, room);
     // Keeps the room's stats record fresh; a room that stops being refreshed
@@ -268,12 +317,20 @@ setInterval(() => {
         pruned = true;
       }
     }
-    if (pruned) pushState(code, room);
+    if (reaped || pruned) pushState(code, room);
+    // Reaping can empty a room, and an empty room has to be scheduled for
+    // cleanup exactly as the last socket closing would have done.
+    if (room.clients.size === 0) scheduleCleanup(code, room);
   }
-}, HEARTBEAT_MS);
+}
+
+setInterval(() => heartbeat(), HEARTBEAT_MS);
 
 function handleClientMessage(code: string, room: LocalRoom, id: string, raw: string): void {
-  if (raw.length > MAX_MESSAGE_BYTES) return;
+  // The cap is bytes, but `raw.length` counts UTF-16 units — 4096 emoji would
+  // slip through at ~16 KB. UTF-8 is never shorter than the UTF-16 length, so
+  // the cheap comparison still rejects oversized strings without encoding them.
+  if (raw.length > MAX_MESSAGE_BYTES || utf8.encode(raw).length > MAX_MESSAGE_BYTES) return;
   room.seen.set(id, Date.now());
   let message: {
     type?: string;
@@ -422,6 +479,7 @@ function handleClientMessage(code: string, room: LocalRoom, id: string, raw: str
 
 /**
  * GET /api/poker/ws?room=CODE&name=NAME — upgrade to a poker-room socket.
+ * Optional: `theme`, `observer`, `pin`, and `cid` (see CID_PATTERN).
  * Returns a JSON error response when the request is not a valid upgrade.
  */
 export function handlePokerSocket(req: Request): Response {
@@ -449,7 +507,9 @@ export function handlePokerSocket(req: Request): Response {
   }
 
   const { socket, response } = Deno.upgradeWebSocket(req);
-  const id = crypto.randomUUID();
+  // The client's stable per-tab id when it sent a usable one, else a fresh one.
+  const cid = url.searchParams.get("cid") ?? "";
+  const id = CID_PATTERN.test(cid) ? cid.toLowerCase() : crypto.randomUUID();
 
   socket.onopen = () => {
     const isNewHere = !rooms.has(code);
@@ -481,6 +541,17 @@ export function handlePokerSocket(req: Request): Response {
       if (room.clients.size === 0) scheduleCleanup(code, room);
       return;
     }
+    // Reclaim: this seat's previous socket is a ghost (its close never arrived,
+    // which is why the client redialled). Retire it before taking the seat over
+    // — the ownership guards below keep its late onclose from evicting us.
+    const previous = room.clients.get(id);
+    if (previous && previous !== socket) {
+      try {
+        previous.close(1000, "reconnected");
+      } catch {
+        /* already closing */
+      }
+    }
     room.clients.set(id, socket);
     room.seen.set(id, Date.now());
     // `hello` asks sibling isolates to answer with their snapshots so a
@@ -494,12 +565,18 @@ export function handlePokerSocket(req: Request): Response {
 
   socket.onmessage = (e) => {
     const room = rooms.get(code);
-    if (room && typeof e.data === "string") handleClientMessage(code, room, id, e.data);
+    if (!room || typeof e.data !== "string") return;
+    // A superseded socket speaks for nobody: the seat belongs to the newer one.
+    if (room.clients.get(id) !== socket) return;
+    handleClientMessage(code, room, id, e.data);
   };
 
   socket.onclose = () => {
     const room = rooms.get(code);
     if (!room) return;
+    // Only the socket that currently holds the seat may vacate it. Without this,
+    // a ghost's late close would evict the very client that just reclaimed it.
+    if (room.clients.get(id) !== socket) return;
     room.clients.delete(id);
     room.seen.delete(id);
     room.relayAt.delete(id);

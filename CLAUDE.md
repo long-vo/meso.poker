@@ -10,13 +10,14 @@ Requires Deno 2.x. No npm/node_modules; the project is dependency-free by design
 ```sh
 deno task start        # serve on http://localhost:8000 (PORT env overrides)
 deno task dev          # same, with --watch
-deno task test         # reducer tests (src/poker.test.ts)
+deno task test         # reducer tests + socket-level server tests (src/*.test.ts)
 deno task check        # type-check main.ts + tests
 deno task lint
 deno task fmt          # format (CI/pre-commit verify with `deno task fmt --check`)
 ```
 
-Run a single test: `deno test --allow-read --filter "substring of test name" src/poker.test.ts`
+Run a single test: `deno test --allow-read --allow-net --filter "substring of test name" src/`
+(`--allow-net` is only needed by `poker-server.test.ts`, which binds an ephemeral port.)
 
 Pre-commit hook (`.githooks/pre-commit`) mirrors CI: fmt --check, check, lint, test. Enable once per
 clone with `git config core.hooksPath .githooks`. CI runs the same four on every push/PR.
@@ -54,10 +55,18 @@ local dev) the channel is quiet and everything still works — don't break this 
 Wire protocol is documented at the top of `poker-server.ts`.
 
 **Server events vs. client events.** Clients never send `join` — the server synthesizes it from the
-WS query params (`/api/poker/ws?room=CODE&name=NAME`, plus optional `theme`, `observer`, `pin`).
-Client messages are size-capped (4 KB) and validated against the reducer; invalid events are no-ops
-returning `false`. The optional 4-digit room `pin` is set by the first joiner and required of the
-rest; it lives on room state, is gossiped between isolates, but is never exposed by `publicState`.
+WS query params (`/api/poker/ws?room=CODE&name=NAME`, plus optional `theme`, `observer`, `pin`,
+`cid`). Client messages are size-capped (4 KB) and validated against the reducer; invalid events are
+no-ops returning `false`. The optional 4-digit room `pin` is set by the first joiner and required of
+the rest; it lives on room state, is gossiped between isolates, but is never exposed by
+`publicState`.
+
+**Participant identity.** `cid` is a UUID the browser keeps in `sessionStorage` and the key
+participants are stored under. A dropped socket redials with the same `cid`, so `join` _reclaims_
+the seat (vote, position and presence intact) instead of adding a second row next to the ghost — the
+old socket's close can arrive minutes late, or never. Only the socket currently holding a seat may
+vacate it, and because the key is stable, a reconnect onto another isolate collapses in `mergeRooms`
+rather than showing twice. Each tab has its own `cid`, so two tabs are still two players.
 
 ## Front-end notes
 
