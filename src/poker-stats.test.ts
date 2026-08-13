@@ -1,10 +1,23 @@
 /**
- * Tests for the pure half of the stats module — the window filter, the liveness
- * rule and the bearer check. Deliberately std-free, like poker.test.ts, and
- * KV-free so `deno task test` needs no extra flags: everything here takes a
- * record and a clock reading.
+ * Tests for the stats module: the pure half — window filter, liveness rule,
+ * bearer check — takes a record and a clock reading, and the storage half runs
+ * against a throwaway in-memory KV.
+ *
+ * The storage tests exist because the interesting bugs live there and none of
+ * the pure functions can see them: a room's sockets can be split across isolates
+ * on Deno Deploy, and each isolate runs its own cleanup timer. `writeRoomActivity`
+ * and `writeRoomClosed` take their handle and clock explicitly so those races can
+ * be played out exactly, with no sleeping and no shared KV singleton.
  */
-import { bearerMatches, inWindow, isLive, type RoomRecord, toPublicRoom } from "./poker-stats.ts";
+import {
+  bearerMatches,
+  inWindow,
+  isLive,
+  type RoomRecord,
+  toPublicRoom,
+  writeRoomActivity,
+  writeRoomClosed,
+} from "./poker-stats.ts";
 
 function assertEquals<T>(actual: T, expected: T, msg?: string): void {
   const a = JSON.stringify(actual);
@@ -149,4 +162,111 @@ Deno.test("bearerMatches: never passes when no token is configured", () => {
 Deno.test("bearerMatches: compares bytes, so unicode tokens work", () => {
   assertEquals(bearerMatches("Bearer pä€ss", "pä€ss"), true);
   assertEquals(bearerMatches("Bearer pa€ss", "pä€ss"), false);
+});
+
+/* -------------------------------- storage --------------------------------- */
+
+/** A throwaway KV per test, so nothing leaks between them. */
+async function freshKv(): Promise<Deno.Kv> {
+  return await Deno.openKv(":memory:");
+}
+
+/** Every session record held for a code, oldest first. */
+async function sessions(kv: Deno.Kv, code: string): Promise<RoomRecord[]> {
+  const found: RoomRecord[] = [];
+  for await (const entry of kv.list<RoomRecord>({ prefix: ["session", code] })) {
+    found.push(entry.value);
+  }
+  return found.sort((a, b) => a.createdAt - b.createdAt);
+}
+
+const hasPointer = async (kv: Deno.Kv, code: string) =>
+  (await kv.get(["live", code])).value !== null;
+
+Deno.test("storage: a room opens once and refreshes in place", async () => {
+  const kv = await freshKv();
+  await writeRoomActivity(kv, "QK7M", 2, NOW);
+  await writeRoomActivity(kv, "QK7M", 4, NOW + 30_000);
+  const [only, ...rest] = await sessions(kv, "QK7M");
+  assertEquals(rest.length, 0, "one session, not one per call");
+  assertEquals(only.createdAt, NOW, "createdAt is pinned to the first sight");
+  assertEquals(only.lastSeenAt, NOW + 30_000);
+  assertEquals(only.peakParticipants, 4);
+  kv.close();
+});
+
+Deno.test("storage: peak survives a refresh with fewer people left", async () => {
+  const kv = await freshKv();
+  await writeRoomActivity(kv, "QK7M", 6, NOW);
+  await writeRoomActivity(kv, "QK7M", 1, NOW + 30_000);
+  const [only] = await sessions(kv, "QK7M");
+  assertEquals(only.participants, 1);
+  assertEquals(only.peakParticipants, 6, "peak is a high-water mark");
+  kv.close();
+});
+
+Deno.test("storage: the isolate holding the last slice closes the room", async () => {
+  const kv = await freshKv();
+  await writeRoomActivity(kv, "QK7M", 3, NOW);
+  // Its room sat empty for the 5-minute cleanup TTL, so nothing refreshed the
+  // session in the meantime and the close is this isolate's to make.
+  await writeRoomClosed(kv, "QK7M", NOW + 5 * MINUTE);
+  const [only] = await sessions(kv, "QK7M");
+  assertEquals(only.destroyedAt, NOW + 5 * MINUTE);
+  assertEquals(only.participants, 0);
+  assertEquals(await hasPointer(kv, "QK7M"), false, "the live pointer is released");
+  kv.close();
+});
+
+Deno.test("storage: a sibling's cleanup cannot close a room still being served", async () => {
+  const kv = await freshKv();
+  await writeRoomActivity(kv, "QK7M", 4, NOW);
+  // The other isolate is still holding sockets and refreshing every 30s...
+  await writeRoomActivity(kv, "QK7M", 4, NOW + 30_000);
+  // ...while this one's slice emptied earlier and its cleanup timer now fires.
+  await writeRoomClosed(kv, "QK7M", NOW + 40_000);
+
+  const open = await sessions(kv, "QK7M");
+  assertEquals(open.length, 1);
+  assertEquals(open[0].destroyedAt, null, "a room others are serving stays open");
+  assertEquals(await hasPointer(kv, "QK7M"), true, "so the pointer must survive");
+
+  // The real damage was downstream: with the pointer gone, the sibling's next
+  // heartbeat used to start a *second* session for the same room.
+  await writeRoomActivity(kv, "QK7M", 2, NOW + 60_000);
+  const after = await sessions(kv, "QK7M");
+  assertEquals(after.length, 1, "still one session, not a split room");
+  assertEquals(after[0].createdAt, NOW, "which keeps its original start");
+  assertEquals(after[0].peakParticipants, 4, "and its peak");
+  kv.close();
+});
+
+Deno.test("storage: a stale cleanup timer cannot close a newer session", async () => {
+  const kv = await freshKv();
+  // An earlier run that died with its process: never closed, never refreshed.
+  await writeRoomActivity(kv, "QK7M", 9, NOW);
+  // Long enough later that the old session has aged out, new people take the
+  // same code and a genuinely new session starts.
+  const later = NOW + 10 * MINUTE;
+  await writeRoomActivity(kv, "QK7M", 3, later);
+  // Only now does the first isolate's forgotten cleanup timer fire.
+  await writeRoomClosed(kv, "QK7M", later + 40_000);
+
+  const [old, fresh] = await sessions(kv, "QK7M");
+  assertEquals(old.createdAt, NOW);
+  assertEquals(fresh.createdAt, later);
+  assertEquals(fresh.destroyedAt, null, "the live room must not be closed by it");
+  assertEquals(await hasPointer(kv, "QK7M"), true);
+  kv.close();
+});
+
+Deno.test("storage: closing is not repeated once a session is closed", async () => {
+  const kv = await freshKv();
+  await writeRoomActivity(kv, "QK7M", 3, NOW);
+  await writeRoomClosed(kv, "QK7M", NOW + 5 * MINUTE);
+  // A duplicate close (both isolates' timers firing) must not move destroyedAt.
+  await writeRoomClosed(kv, "QK7M", NOW + 9 * MINUTE);
+  const [only] = await sessions(kv, "QK7M");
+  assertEquals(only.destroyedAt, NOW + 5 * MINUTE, "the first close stands");
+  kv.close();
 });

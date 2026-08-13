@@ -16,11 +16,13 @@ deno task lint
 deno task fmt          # format (CI/pre-commit verify with `deno task fmt --check`)
 ```
 
-Run a single test: `deno test --allow-read --allow-net --filter "substring of test name" src/`
-(`--allow-net` is only needed by `poker-server.test.ts`, which binds an ephemeral port.)
+Run a single test: `deno task test --filter "substring of test name"`. Go through the task rather
+than a bare `deno test` — the socket tests bind an ephemeral port and the stats tests open an
+in-memory KV, so the flag list lives in `deno.json` and is easy to get wrong by hand.
 
 Pre-commit hook (`.githooks/pre-commit`) mirrors CI: fmt --check, check, lint, test. Enable once per
-clone with `git config core.hooksPath .githooks`. CI runs the same four on every push/PR.
+clone with `git config core.hooksPath .githooks`. CI (`.github/workflows/ci.yml`) runs the same four
+tasks on every push/PR — both invoke `deno task …` so the two cannot drift apart.
 
 ## Architecture
 

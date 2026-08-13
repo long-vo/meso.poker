@@ -20,14 +20,17 @@ jobs:
         with:
           deno-version: v2.x
 
+      # Run the tasks rather than spelling the commands out again: deno.json is
+      # the single source of truth for flags and file lists, and the pre-commit
+      # hook runs the same four, so the two cannot drift apart.
       - name: Format check
-        run: deno fmt --check
+        run: deno task fmt --check
 
       - name: Lint
-        run: deno lint
+        run: deno task lint
 
       - name: Type check
-        run: deno check main.ts src/poker.test.ts
+        run: deno task check
 
       - name: Test
-        run: deno test --allow-read
+        run: deno task test

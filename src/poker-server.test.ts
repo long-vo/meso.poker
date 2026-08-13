@@ -15,6 +15,12 @@
  */
 import { CLIENT_TIMEOUT_MS, handlePokerSocket, heartbeat } from "./poker-server.ts";
 
+// Joining a room records stats, and the test task enables KV. Pin the store to
+// an in-memory one so a test run can never write phantom rooms into the database
+// a local `deno task start` reads from. The stats module opens KV lazily, on the
+// first join inside a test, so setting this at module scope is early enough.
+Deno.env.set("POKER_KV_PATH", ":memory:");
+
 function assertEquals(actual: unknown, expected: unknown, msg?: string): void {
   const a = JSON.stringify(actual);
   const e = JSON.stringify(expected);
@@ -23,10 +29,14 @@ function assertEquals(actual: unknown, expected: unknown, msg?: string): void {
   }
 }
 
-/** A server on an ephemeral port, so tests never collide with a dev server. */
+/**
+ * A server on an ephemeral port, so tests never collide with a dev server, and
+ * on loopback only — a test has no business listening on every interface of a
+ * shared CI runner.
+ */
 function startServer() {
   const server = Deno.serve(
-    { port: 0, onListen: () => {} },
+    { hostname: "127.0.0.1", port: 0, onListen: () => {} },
     (req: Request) =>
       new URL(req.url).pathname === "/api/poker/ws" ? handlePokerSocket(req) : new Response("ok"),
   );
@@ -222,7 +232,7 @@ async function startSiblingIsolate(): Promise<{ port: number; stop: () => void }
     import { handlePokerSocket } from ${
     JSON.stringify(new URL("./poker-server.ts", import.meta.url).href)
   };
-    Deno.serve({ port: 0, onListen: ({ port }) => self.postMessage({ port }) }, (req) =>
+    Deno.serve({ hostname: "127.0.0.1", port: 0, onListen: ({ port }) => self.postMessage({ port }) }, (req) =>
       new URL(req.url).pathname === "/api/poker/ws" ? handlePokerSocket(req) : new Response("ok"));
   `;
   const url = URL.createObjectURL(new Blob([source], { type: "application/javascript" }));

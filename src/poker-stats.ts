@@ -32,8 +32,10 @@
  * isolate refreshes `lastSeenAt` on its 30s heartbeat while it holds sockets, so
  * a room whose process was killed — no cleanup, no destroy event ever — ages out
  * by itself instead of being reported live forever. `destroyedAt` stays
- * best-effort: the isolate that drops the last local slice writes it, and a
- * sibling that still holds sockets clears it on its next heartbeat.
+ * best-effort, and freshness guards it too: a close is only written once nothing
+ * has refreshed the session for LIVE_TTL_MS, so an isolate whose own slice
+ * emptied first cannot close a room its siblings are still serving (which would
+ * strand the survivors into a second session for the same room).
  */
 
 /** Rolling window the endpoint reports on. */
@@ -97,8 +99,11 @@ export function toPublicRoom(record: RoomRecord, now: number): PublicRoom {
     lastSeenAt: new Date(record.lastSeenAt).toISOString(),
     live,
     minutes: Math.max(0, Math.round((until - record.createdAt) / 60_000)),
-    participants: live ? record.participants : 0,
-    peakParticipants: record.peakParticipants,
+    // Defaulted like the write path does: `isRecord` doesn't vet the counts, and
+    // an undefined here would be dropped from the JSON entirely rather than
+    // reported as 0.
+    participants: live ? record.participants ?? 0 : 0,
+    peakParticipants: record.peakParticipants ?? 0,
   };
 }
 
@@ -187,69 +192,94 @@ async function currentSession(
 }
 
 /**
+ * The write behind `recordRoomActivity`, with its handle and clock passed in so
+ * tests can drive it without the module's KV singleton or real time.
+ */
+export async function writeRoomActivity(
+  handle: Deno.Kv,
+  code: string,
+  participants: number,
+  now: number,
+): Promise<void> {
+  const session = await currentSession(handle, code, now);
+
+  if (session) {
+    const next: RoomRecord = {
+      ...session.record,
+      destroyedAt: null,
+      lastSeenAt: now,
+      participants,
+      peakParticipants: Math.max(session.record.peakParticipants ?? 0, participants),
+    };
+    // Compare-and-swap rather than a blind set, so two isolates refreshing at
+    // once can't clobber each other's peak. Losing the race is harmless: the
+    // winner already refreshed lastSeenAt, and the next heartbeat retries.
+    await handle.atomic()
+      .check({ key: session.key, versionstamp: session.versionstamp })
+      .set(session.key, next, { expireIn: WINDOW_MS })
+      .commit();
+    return;
+  }
+
+  // No live session: claim the pointer. Checking the versionstamp we just read
+  // (null when absent, or a stale pointer's) means exactly one isolate creates
+  // the session and any other falls through to the next heartbeat.
+  const pointer = await handle.get<Pointer>(liveKey(code));
+  const record: RoomRecord = {
+    code,
+    createdAt: now,
+    destroyedAt: null,
+    lastSeenAt: now,
+    participants,
+    peakParticipants: participants,
+  };
+  await handle.atomic()
+    .check({ key: liveKey(code), versionstamp: pointer.versionstamp })
+    .set(liveKey(code), { startedAt: now }, { expireIn: WINDOW_MS })
+    .set(sessionKey(code, now), record, { expireIn: WINDOW_MS })
+    .commit();
+}
+
+/**
  * Record that a room is open, creating its session on first sight. Called on
  * every join and leave and on the server heartbeat, so `lastSeenAt` keeps the
  * room live and `participants` tracks the merged count.
  */
 export function recordRoomActivity(code: string, participants: number): void {
-  background(async (handle) => {
-    const now = Date.now();
-    const session = await currentSession(handle, code, now);
+  background((handle) => writeRoomActivity(handle, code, participants, Date.now()));
+}
 
-    if (session) {
-      const next: RoomRecord = {
-        ...session.record,
-        destroyedAt: null,
-        lastSeenAt: now,
-        participants,
-        peakParticipants: Math.max(session.record.peakParticipants ?? 0, participants),
-      };
-      // Compare-and-swap rather than a blind set, so two isolates refreshing at
-      // once can't clobber each other's peak. Losing the race is harmless: the
-      // winner already refreshed lastSeenAt, and the next heartbeat retries.
-      await handle.atomic()
-        .check({ key: session.key, versionstamp: session.versionstamp })
-        .set(session.key, next, { expireIn: WINDOW_MS })
-        .commit();
-      return;
-    }
-
-    // No live session: claim the pointer. Checking the versionstamp we just read
-    // (null when absent, or a stale pointer's) means exactly one isolate creates
-    // the session and any other falls through to the next heartbeat.
-    const pointer = await handle.get<Pointer>(liveKey(code));
-    const record: RoomRecord = {
-      code,
-      createdAt: now,
-      destroyedAt: null,
-      lastSeenAt: now,
-      participants,
-      peakParticipants: participants,
-    };
-    await handle.atomic()
-      .check({ key: liveKey(code), versionstamp: pointer.versionstamp })
-      .set(liveKey(code), { startedAt: now }, { expireIn: WINDOW_MS })
-      .set(sessionKey(code, now), record, { expireIn: WINDOW_MS })
-      .commit();
-  });
+/**
+ * The write behind `recordRoomClosed`, with its handle and clock passed in.
+ *
+ * A cleanup timer only speaks for the isolate that set it, so it may close the
+ * session only once nothing is refreshing it any more. A sibling still holding
+ * sockets refreshes every 30s, and a session started after this timer was set is
+ * fresher still — closing on either would end a room that is still running, and
+ * the next heartbeat would then open a second session for it. The isolate that
+ * genuinely held the last slice always sees a stale record: its own room sat
+ * empty for EMPTY_ROOM_TTL_MS (5 min) before this fires, far longer than the
+ * 95s liveness window.
+ */
+export async function writeRoomClosed(handle: Deno.Kv, code: string, now: number): Promise<void> {
+  const pointer = await handle.get<Pointer>(liveKey(code));
+  if (!pointer.value) return;
+  const key = sessionKey(code, pointer.value.startedAt);
+  const entry = await handle.get<RoomRecord>(key);
+  if (!isRecord(entry.value)) return;
+  // Already closed, or someone is still serving it: not this isolate's to close.
+  if (entry.value.destroyedAt !== null || isLive(entry.value, now)) return;
+  const closed: RoomRecord = { ...entry.value, destroyedAt: now, participants: 0 };
+  await handle.atomic()
+    .check({ key, versionstamp: entry.versionstamp })
+    .set(key, closed, { expireIn: WINDOW_MS })
+    .delete(liveKey(code))
+    .commit();
 }
 
 /** Record that a room went away. Best-effort — see the module comment. */
 export function recordRoomClosed(code: string): void {
-  background(async (handle) => {
-    const now = Date.now();
-    const pointer = await handle.get<Pointer>(liveKey(code));
-    if (!pointer.value) return;
-    const key = sessionKey(code, pointer.value.startedAt);
-    const entry = await handle.get<RoomRecord>(key);
-    if (!isRecord(entry.value)) return;
-    const closed: RoomRecord = { ...entry.value, destroyedAt: now, participants: 0 };
-    await handle.atomic()
-      .check({ key, versionstamp: entry.versionstamp })
-      .set(key, closed, { expireIn: WINDOW_MS })
-      .delete(liveKey(code))
-      .commit();
-  });
+  background((handle) => writeRoomClosed(handle, code, Date.now()));
 }
 
 /* -------------------------------- endpoint -------------------------------- */
