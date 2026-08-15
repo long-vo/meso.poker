@@ -49,6 +49,7 @@ const els = {
   notifyHintSetup: $("notify-hint-setup"),
   notifyHintEnable: $("notify-hint-enable"),
   notifyHintDismiss: $("notify-hint-dismiss"),
+  landing: $("landing"),
   join: $("join"),
   joinError: $("join-error"),
   joinBtn: $("join-btn"),
@@ -101,6 +102,19 @@ const els = {
   noteDate: $("note-date"),
   noteText: $("note-text"),
   noteAdd: $("note-add"),
+  ideasPanel: $("ideas-card"),
+  ideasToggle: $("ideas-toggle"),
+  ideasForm: $("ideas-form"),
+  ideasSent: $("ideas-sent"),
+  ideaPrompts: $("idea-prompts"),
+  ideaText: $("idea-text"),
+  ideaName: $("idea-name"),
+  ideaSend: $("idea-send"),
+  ideaCounter: $("idea-counter"),
+  ideaThanks: $("idea-thanks"),
+  ideaSentLede: $("idea-sent-lede"),
+  ideaBackup: $("idea-backup"),
+  ideaAgain: $("idea-again"),
 };
 
 /** Current session: null until joined. */
@@ -1813,7 +1827,7 @@ function joinRoom(code, pinArg) {
   renderSession();
   els.noteDate.value = todayStr();
   els.roomChip.textContent = code;
-  els.join.hidden = true;
+  els.landing.hidden = true;
   els.table.hidden = false;
   els.controlsToggle.hidden = false;
   // The table just became visible; align the theme dots once it has laid out.
@@ -1832,7 +1846,7 @@ function leaveRoom() {
   els.sessionStrip.hidden = true;
   els.sessionStrip.innerHTML = "";
   els.table.hidden = true;
-  els.join.hidden = false;
+  els.landing.hidden = false;
   els.controlsToggle.hidden = true;
   els.story.value = "";
   wheelRotation = 0;
@@ -1969,6 +1983,139 @@ try {
 }
 reflectControlsToggle();
 els.controlsToggle.addEventListener("click", toggleControls);
+
+/* ------------------------------ ideas panel ------------------------------
+   The landing screen's suggestion box. Sending copies the (optionally signed)
+   idea to the clipboard and opens the discussions board on meso.utilities —
+   this repo has Discussions turned off, and the hub it was split out of is
+   where they live. Nothing is posted on the user's behalf: they land on the
+   new-discussion form with the text on their clipboard and post it themselves.
+   Whether the card is folded is local view state, remembered per browser like
+   the table's panels. */
+const IDEAS_OPEN_KEY = "meso-poker-ideas-open";
+const IDEAS_URL = "https://github.com/long-vo/meso.utilities/discussions";
+const IDEA_MIN = 4;
+const IDEA_TITLE_MAX = 120;
+const IDEA_URL_MAX = 6000;
+const IDEA_PROMPTS = [
+  "A shortcut I keep wanting",
+  "Something that slows me down",
+  "A feature idea",
+  "Make this clearer",
+];
+
+/** Starter prompts, so a blank box isn't the first thing to beat. */
+function buildIdeaPrompts() {
+  for (const label of IDEA_PROMPTS) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "ideas-prompt";
+    btn.textContent = label;
+    btn.addEventListener("click", () => {
+      const written = els.ideaText.value.replace(/\s+$/, "");
+      els.ideaText.value = written ? `${written}\n${label} ` : `${label} `;
+      reflectIdea();
+      // Caret at the end, so typing carries on from the label just dropped in.
+      els.ideaText.focus();
+      els.ideaText.setSelectionRange(els.ideaText.value.length, els.ideaText.value.length);
+    });
+    els.ideaPrompts.appendChild(btn);
+  }
+}
+
+/** Counter and send button follow the textarea. */
+function reflectIdea() {
+  const len = els.ideaText.value.trim().length;
+  els.ideaSend.disabled = len < IDEA_MIN;
+  els.ideaCounter.textContent = len < IDEA_MIN ? "A sentence is plenty." : `${len} characters`;
+}
+
+/** @param {boolean} open */
+function setIdeasOpen(open) {
+  els.ideasPanel.classList.toggle("collapsed", !open);
+  els.ideasToggle.setAttribute("aria-expanded", String(open));
+  try {
+    localStorage.setItem(IDEAS_OPEN_KEY, open ? "1" : "");
+  } catch {
+    /* fine */
+  }
+}
+
+/**
+ * Show the thank-you in place of the form, wording it for how the idea
+ * actually travelled.
+ * @param {string} name
+ * @param {boolean} prefilled whether the discussion form carries the text
+ * @param {boolean} copied whether the clipboard took it as well
+ */
+function showIdeaSent(name, prefilled, copied) {
+  els.ideaThanks.textContent = name ? `Thanks, ${name} — it's in.` : "Thanks — it's in.";
+  els.ideaSentLede.textContent = prefilled
+    ? "The GitHub discussion is open with your idea already filled in — give it a look and post."
+    : "The GitHub discussion is open — paste your idea in and post.";
+  els.ideaBackup.textContent = prefilled && copied
+    ? "It's on your clipboard too, just in case."
+    : "";
+  els.ideasForm.hidden = true;
+  els.ideasSent.hidden = false;
+}
+
+function sendIdea() {
+  const body = els.ideaText.value.trim();
+  if (body.length < IDEA_MIN) return;
+  const name = els.ideaName.value.trim();
+  const signed = name ? `${body}\n\n— ${name}` : body;
+
+  // GitHub reads title/body off the query string, so the discussion form opens
+  // filled in. Undocumented but long-standing; the clipboard copy below is the
+  // fallback for when it isn't honoured (the mobile app drops these params).
+  const url = new URL(`${IDEAS_URL}/new`);
+  url.searchParams.set("category", "ideas");
+  url.searchParams.set("title", body.split("\n", 1)[0].slice(0, IDEA_TITLE_MAX));
+  url.searchParams.set("body", signed);
+  // A long idea in an accented or non-Latin script encodes several bytes per
+  // character and can outgrow what a URL will carry, so the prefill is dropped
+  // rather than sent as a request GitHub would reject.
+  const prefilled = url.href.length <= IDEA_URL_MAX;
+  if (!prefilled) url.searchParams.delete("body");
+
+  // Both the copy and the popup need the click's user activation, so they fire
+  // in this tick — awaiting the copy first would get the window blocked.
+  const copy = navigator.clipboard
+    ? navigator.clipboard.writeText(signed)
+    : Promise.reject(new Error("no clipboard"));
+  globalThis.open(url.href, "_blank", "noopener");
+
+  copy.then(
+    () => showIdeaSent(name, prefilled, true),
+    () => {
+      // Without the prefill the clipboard was the only copy, so the form stays
+      // put with the text still in it rather than thanking them for a lost idea.
+      if (prefilled) showIdeaSent(name, true, false);
+      else showToast("Couldn't copy — copy your idea from the box and paste it on GitHub.");
+    },
+  );
+}
+
+buildIdeaPrompts();
+reflectIdea();
+try {
+  setIdeasOpen(localStorage.getItem(IDEAS_OPEN_KEY) !== "");
+} catch {
+  /* fine */
+}
+els.ideasToggle.addEventListener("click", () => {
+  setIdeasOpen(els.ideasPanel.classList.contains("collapsed"));
+});
+els.ideaText.addEventListener("input", reflectIdea);
+els.ideaSend.addEventListener("click", sendIdea);
+els.ideaAgain.addEventListener("click", () => {
+  els.ideaText.value = "";
+  reflectIdea();
+  els.ideasSent.hidden = true;
+  els.ideasForm.hidden = false;
+  els.ideaText.focus();
+});
 
 els.reveal.addEventListener("click", () => session?.transport.send({ type: "reveal" }));
 els.reset.addEventListener("click", () => session?.transport.send({ type: "reset" }));

@@ -39,6 +39,7 @@
   </header>
 
   <main class="poker">
+    <div id="landing" class="landing">
     <section id="join" class="panel join-panel" aria-label="Join a room">
       <h1>Scrum Poker</h1>
       <p class="hint-lede">Estimate stories together — everyone picks a card, then reveal at once.</p>
@@ -83,6 +84,85 @@
 
       <p id="join-error" class="error-line" role="alert"></p>
     </section>
+
+    <section id="ideas" class="ideas-wrap" aria-label="Share an idea">
+      <div class="ideas-glow" aria-hidden="true"><span></span><span></span><span></span></div>
+      <div id="ideas-card" class="panel ideas-panel">
+        <button id="ideas-toggle" class="ideas-head" type="button" aria-expanded="true"
+          aria-controls="ideas-body" aria-label="Got an idea to make this tool better?">
+          <span class="ideas-mark" aria-hidden="true">
+            <span class="ideas-ring"></span>
+            <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor"
+              stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M9.4 18h5.2" />
+              <path d="M10.2 21h3.6" />
+              <path d="M12 3a6 6 0 0 0-3.6 10.8c.5.4.8 1 .9 1.6l.1.6h5.2l.1-.6c.1-.6.4-1.2.9-1.6A6 6 0 0 0 12 3Z" />
+            </svg>
+            <span class="ideas-spark"></span>
+            <span class="ideas-spark"></span>
+          </span>
+          <span class="ideas-head-text">
+            <span class="ideas-eyebrow">Ideas welcome</span>
+            <span class="ideas-title">Got an idea to make this tool better?</span>
+            <span class="ideas-lede">Anything counts — a shortcut you keep wishing for, a rough
+              edge, a whole new feature. Drop it here and it lands with the people building it.</span>
+          </span>
+          <span class="ideas-chevron" aria-hidden="true">
+            <svg viewBox="0 0 16 16" width="18" height="18" fill="none" stroke="currentColor"
+              stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M3.5 6.25 8 10.75l4.5-4.5" />
+            </svg>
+          </span>
+        </button>
+
+        <div id="ideas-body" class="ideas-body">
+          <div id="ideas-form" class="ideas-form">
+            <div id="idea-prompts" class="chips ideas-prompts"></div>
+
+            <div class="field">
+              <label for="idea-text">Your idea</label>
+              <textarea id="idea-text" rows="4" maxlength="2000" autocomplete="off"
+                placeholder="I'd love it if…"></textarea>
+            </div>
+
+            <div class="ideas-send-row">
+              <div class="field">
+                <label for="idea-name">Your name (optional)</label>
+                <input id="idea-name" type="text" maxlength="40" autocomplete="off"
+                  placeholder="So we can follow up" />
+              </div>
+              <button id="idea-send" class="btn btn-primary" type="button" disabled>Send idea</button>
+            </div>
+
+            <div class="ideas-foot">
+              <span id="idea-counter" class="hint">A sentence is plenty.</span>
+              <a class="ideas-link" href="https://github.com/long-vo/meso.utilities/discussions"
+                target="_blank" rel="noopener">💬 Or discuss it on GitHub</a>
+            </div>
+          </div>
+
+          <div id="ideas-sent" class="ideas-sent" role="status" hidden>
+            <div class="ideas-sent-mark" aria-hidden="true">
+              <span class="ideas-ring"></span>
+              <svg viewBox="0 0 24 24" width="22" height="22" fill="none">
+                <path d="M5 12.5l4.2 4.2L19 7" stroke="currentColor" stroke-width="2.4"
+                  stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="34" />
+              </svg>
+            </div>
+            <div class="ideas-sent-text">
+              <strong id="idea-thanks">Thanks — it's in.</strong>
+              <span>
+                <span id="idea-sent-lede">The GitHub discussion is open with your idea already
+                  filled in — give it a look and post.</span>
+                <span id="idea-backup"></span>
+              </span>
+            </div>
+            <button id="idea-again" class="btn btn-small ideas-again" type="button">Share another</button>
+          </div>
+        </div>
+      </div>
+    </section>
+    </div>
 
     <section id="table" hidden>
       <p id="connect-hint" class="connect-hint" role="status" aria-live="polite" hidden></p>
