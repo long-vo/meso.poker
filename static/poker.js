@@ -1394,12 +1394,24 @@ function wheelHue(index, count) {
   return Math.round((index * 360) / Math.max(count, 1));
 }
 
+/**
+ * Segment saturation and lightness are per-mode tokens (see the colour modes
+ * in styles.css), so the disc follows the ground it is painted on: muted on
+ * paper, brighter on the dark and brand grounds. Only the hue stays per-name.
+ */
+function wheelToken(name, fallback) {
+  const value = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  return value || fallback;
+}
+
 function wheelColor(index, count) {
-  return `hsl(${wheelHue(index, count)} 62% 46%)`;
+  return `hsl(${wheelHue(index, count)} ${wheelToken("--wheel-sat", "62%")} ${
+    wheelToken("--wheel-light", "46%")
+  })`;
 }
 
 function wheelLabelColor(index, count) {
-  return `hsl(${wheelHue(index, count)} 90% 88%)`;
+  return `hsl(${wheelHue(index, count)} 90% ${wheelToken("--wheel-label-light", "88%")})`;
 }
 
 /** The list the wheel runs on: room joiners until someone edits it. */
@@ -2254,6 +2266,18 @@ els.spin.addEventListener("click", () => {
   const winner = weightedPick(names, pickCounts);
   notePick(pickCounts, winner, names);
   session.transport.send({ type: "wheel-spin", winner });
+});
+
+/* A colour-mode switch names itself in a toast, and repaints the wheel: its
+   segment colours are baked into the SVG when it is built, so unlike every
+   other surface it cannot re-tint itself. A spin in flight is left alone —
+   rebuilding mid-animation would reset the rotation. */
+addEventListener("meso-theme-change", (event) => {
+  const mode = event.detail;
+  showToast(`${mode.icon} ${mode.label} — ${mode.note}`);
+  if (!lastState || wheelSpinning) return;
+  wheelNamesKey = "";
+  renderWheel(lastState);
 });
 
 // Tell the server we're gone on refresh/tab close: a deliberate close beats

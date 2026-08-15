@@ -30,6 +30,11 @@
   --shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
   --mono: ui-monospace, "SF Mono", "JetBrains Mono", "Fira Code", Menlo, Consolas, monospace;
   --sans: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  /* Name-wheel segments: saturation/lightness per colour mode, so the picker
+     follows the ground it is painted on (see wheelColor in poker.js). */
+  --wheel-sat: 62%;
+  --wheel-light: 46%;
+  --wheel-label-light: 88%;
 }
 
 :root[data-theme="light"] {
@@ -51,6 +56,62 @@
   --mask: #b8620f;
   --player: #0f8a7a;
   --shadow: 0 10px 28px rgba(20, 30, 50, 0.12);
+}
+
+/* Paper: a warm off-white ground for bright rooms and long sessions. Lower
+   contrast than light mode by design — the accents are inks rather than
+   screen colours, and the decoration is dialled down further below. */
+:root[data-theme="paper"] {
+  --bg: #efe9dd;
+  --bg-elev: #fbf7f0;
+  --bg-inset: #f3ece1;
+  --border: #e2d8c6;
+  --border-strong: #c9bca4;
+  --text: #2b2419;
+  --text-dim: #5f5443;
+  --text-faint: #8a7e69;
+  --accent: #2a6b8f;
+  --accent-2: #6f4a94;
+  --good: #3f6b3a;
+  --warn: #8a5a12;
+  --on-warn: #fff;
+  /* Like light mode: the ochre is already dark enough to carry white text. */
+  --chip-top-bg: var(--warn);
+  --danger: #a33224;
+  --mask: #a1601f;
+  --player: #1d6b62;
+  --on-accent: #fff;
+  --shadow: 0 6px 16px rgba(92, 74, 44, 0.10);
+  --wheel-sat: 34%;
+  --wheel-light: 44%;
+  --wheel-label-light: 93%;
+}
+
+/* Mesoneer: the brand palette, sampled off the logo tile (#2b204a - #422a82).
+   A dark mode like the default, so every dark-ground rule already holds. */
+:root[data-theme="mesoneer"] {
+  --bg: #191233;
+  --bg-elev: #241a45;
+  --bg-inset: #150f2c;
+  --border: #33285c;
+  --border-strong: #4a3b7d;
+  --text: #f0ecff;
+  --text-dim: #b5a9dd;
+  --text-faint: #8b7fb4;
+  --accent: #8b6cff;
+  --accent-2: #c86bd9;
+  --good: #3fd39a;
+  --warn: #d9a83c;
+  --on-warn: #fff;
+  --chip-top-bg: color-mix(in srgb, var(--warn) 55%, var(--bg-elev));
+  --danger: #ff5f78;
+  --mask: #f3915c;
+  --player: #4bc9c0;
+  --on-accent: #fff;
+  --shadow: 0 12px 34px rgba(8, 3, 26, 0.55);
+  --wheel-sat: 58%;
+  --wheel-light: 52%;
+  --wheel-label-light: 90%;
 }
 
 * {
@@ -2322,4 +2383,57 @@ textarea:focus {
 }
 .notes-add-row .btn {
   margin-left: auto;
+}
+
+/* ---- colour modes: what tokens alone can't carry ----
+   Paper is a low-glare mode, so the page loses the coloured washes behind it,
+   the ideas card loses its halo and the panels lose their shadows: the surface
+   reads as paper. The signature accent-to-violet gradient goes with them —
+   headings print as solid ink. Mesoneer keeps every dark-mode treatment and
+   only re-grounds the page in the brand purple, where the same gradient runs
+   violet to magenta on its own. */
+:root[data-theme="paper"] body {
+  background: var(--bg);
+}
+:root[data-theme="paper"] .topbar {
+  background: color-mix(in srgb, var(--bg-elev) 88%, transparent);
+}
+:root[data-theme="paper"] .ideas-glow {
+  display: none;
+}
+:root[data-theme="paper"] .panel {
+  box-shadow: none;
+}
+:root[data-theme="paper"] .brand-name,
+:root[data-theme="paper"] .join-panel h1,
+:root[data-theme="paper"] .pick-label {
+  background-image: none;
+  -webkit-text-fill-color: currentColor;
+  color: var(--text);
+}
+:root[data-theme="paper"] .panel-head h2,
+:root[data-theme="paper"] .room-label,
+:root[data-theme="paper"] .story-panel label {
+  background-image: none;
+  -webkit-text-fill-color: currentColor;
+  color: var(--text-dim);
+}
+:root[data-theme="paper"] .panel-toggle::before {
+  background-image: linear-gradient(var(--text-dim), var(--text-dim));
+}
+
+:root[data-theme="mesoneer"] body {
+  background:
+    radial-gradient(1100px 620px at 100% -10%, rgba(66, 42, 130, 0.85), transparent),
+    radial-gradient(900px 520px at -10% 0%, rgba(90, 52, 160, 0.35), transparent),
+    var(--bg);
+}
+
+/* The brand tile stands in for the emoji on the mode button in Mesoneer mode. */
+.theme-icon-mark {
+  display: block;
+  width: 20px;
+  height: 20px;
+  margin: 0 auto;
+  border-radius: 5px;
 }
