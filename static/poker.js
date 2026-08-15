@@ -9,9 +9,11 @@ import {
   CODE_PATTERN,
   createRoom,
   DECK,
+  freshNotes,
   generateRoomCode,
   isAway,
   LIMITS,
+  noteCutoff,
   publicState,
   REACTIONS,
   roundOutliers,
@@ -355,6 +357,8 @@ function createSolo(name, observer, pin, onState) {
     password: pin,
     at: Date.now(),
   });
+  // Same age-out the server runs on join, so solo rooms clean up too.
+  applyEvent(room, { type: "notes-sweep", cutoff: noteCutoff(), at: Date.now() });
   const push = () => onState(publicState(room, "you"));
   queueMicrotask(push);
   return {
@@ -378,6 +382,8 @@ function createSolo(name, observer, pin, onState) {
         ? { type: "wheel-spin", winner: message.winner, at: Date.now() }
         : message.type === "notes-set"
         ? { type: "notes-set", notes: message.notes, id: "you", at: Date.now() }
+        : message.type === "note-add" || message.type === "note-remove"
+        ? { type: message.type, note: message.note, id: "you", at: Date.now() }
         : message.type === "theme"
         ? { type: "theme", id: "you", theme: message.theme }
         : message.type === "status"
@@ -857,10 +863,23 @@ let notesSeedChecked = false;
 let lastNotesAt = -1;
 
 /** Local YYYY-MM-DD (toISOString would shift the date across midnight UTC). */
-function todayStr() {
-  const now = new Date();
+function dateStr(d) {
   const pad = (n) => String(n).padStart(2, "0");
-  return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
+function todayStr() {
+  return dateStr(new Date());
+}
+
+/* Point the date field at today and grey out everything before it. `min` only
+   steers the picker — a typed-in date still arrives in `.value` — so addNote
+   re-checks against a fresh today, which also covers a tab left open overnight
+   while this attribute went stale. */
+function resetNoteDate() {
+  const today = todayStr();
+  els.noteDate.min = today;
+  els.noteDate.value = today;
 }
 
 function formatNoteDate(date) {
@@ -893,8 +912,15 @@ function renderNotes(state) {
     if (at === 0 && list.length === 0) {
       try {
         const saved = JSON.parse(localStorage.getItem(notesKey(session.code)) ?? "null");
-        const seed = sanitizeNotes(saved?.list);
+        // Aged-out notes are dropped here rather than in the live room: the
+        // reducer refuses an edit that removes someone else's note, and this
+        // is the one point where the list arrives with no owners to offend.
+        // What survives is re-saved on the next render, so the copy shrinks.
+        const seed = freshNotes(sanitizeNotes(saved?.list), noteCutoff());
         if (seed.length) session.transport.send({ type: "notes-set", notes: seed });
+        // Nothing left worth keeping — bin the entry instead of re-reading a
+        // dead list on every open.
+        else if (saved) localStorage.removeItem(notesKey(session.code));
       } catch {
         /* corrupt copy — start clean */
       }
@@ -914,7 +940,7 @@ function renderNotes(state) {
   // Only your own notes get a remove button (the reducer enforces the same
   // rule server-side); author-less notes are fair game for anyone.
   const myName = state.participants.find((p) => p.you)?.name ?? "";
-  list.forEach((note, index) => {
+  list.forEach((note) => {
     const row = document.createElement("div");
     row.className = "note" + (note.date === today ? " today" : note.date < today ? " past" : "");
     const date = document.createElement("span");
@@ -939,10 +965,7 @@ function renderNotes(state) {
       remove.title = "Remove note";
       remove.setAttribute("aria-label", `Remove note: ${note.text}`);
       remove.addEventListener("click", () => {
-        session?.transport.send({
-          type: "notes-set",
-          notes: list.filter((_, i) => i !== index),
-        });
+        session?.transport.send({ type: "note-remove", note });
       });
       row.appendChild(remove);
     }
@@ -962,6 +985,10 @@ function addNote() {
     showToast("Pick a date for the note");
     return;
   }
+  if (date < todayStr()) {
+    showToast("Notes can't be dated in the past");
+    return;
+  }
   const list = lastState.notes.list;
   if (list.length >= LIMITS.notes) {
     showToast(`A room holds at most ${LIMITS.notes} notes`);
@@ -969,8 +996,8 @@ function addNote() {
   }
   const mine = lastState.participants.find((p) => p.you);
   session.transport.send({
-    type: "notes-set",
-    notes: [...list, { date, text, who: mine?.name ?? session.name, at: Date.now() }],
+    type: "note-add",
+    note: { date, text, who: mine?.name ?? session.name, at: Date.now() },
   });
   els.noteText.value = "";
   els.noteText.style.height = ""; // collapse the auto-grown field
@@ -1825,7 +1852,7 @@ function joinRoom(code, pinArg) {
   loadSessionLog(code);
   sessionPaintKey = "";
   renderSession();
-  els.noteDate.value = todayStr();
+  resetNoteDate();
   els.roomChip.textContent = code;
   els.landing.hidden = true;
   els.table.hidden = false;
@@ -2202,7 +2229,7 @@ els.noteText.addEventListener("input", () => {
   els.noteText.style.height = "auto";
   els.noteText.style.height = `${els.noteText.scrollHeight + 2}px`;
 });
-els.noteDate.value = todayStr();
+resetNoteDate();
 
 // Fair-play weighting: the client keeps an in-memory tally of how often each
 // name has been picked this round (resets on reload). weightedPick/notePick

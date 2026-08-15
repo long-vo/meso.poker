@@ -11,10 +11,12 @@ import {
   computeStats,
   createRoom,
   DECK,
+  freshNotes,
   generateRoomCode,
   isAway,
   LIMITS,
   mergeRooms,
+  noteCutoff,
   publicState,
   roundOutliers,
   roundVerdict,
@@ -517,6 +519,163 @@ Deno.test("sanitizeNotes keeps well-formed notes, sorts by date, caps fields and
     Array.from({ length: 99 }, (_, i) => ({ date: "2026-01-01", text: `n${i}`, at: i })),
   );
   assertEquals(many.length, LIMITS.notes);
+});
+
+Deno.test("two people adding a note at once keep both", () => {
+  const room = roomWith("Ana", "Ben"); // p1 = Ana, p2 = Ben
+  // Neither has seen the other's note, so both compose from the same base.
+  // A whole-list notes-set would make Ben's add look like it deletes Ana's.
+  const anas = { date: "2026-08-20", text: "Ana's", who: "Ana", at: 1 };
+  const bens = { date: "2026-08-20", text: "Ben's", who: "Ben", at: 2 };
+  assertEquals(applyEvent(room, { type: "note-add", note: anas, at: 10, id: "p1" }), true);
+  assertEquals(
+    applyEvent(room, { type: "note-add", note: bens, at: 11, id: "p2" }),
+    true,
+    "Ben's add is not mistaken for dropping Ana's note",
+  );
+  assertEquals(room.notes.map((n) => n.text), ["Ana's", "Ben's"]);
+  assertEquals(room.notesAt, 11);
+});
+
+Deno.test("two people removing different notes at once keep both removals", () => {
+  const room = roomWith("Ana", "Ben");
+  const a = { date: "2026-08-20", text: "chore A", who: "", at: 1 };
+  const b = { date: "2026-08-21", text: "chore B", who: "", at: 2 };
+  applyEvent(room, { type: "notes-set", notes: [a, b], at: 20 });
+  assertEquals(applyEvent(room, { type: "note-remove", note: a, at: 21, id: "p1" }), true);
+  assertEquals(
+    applyEvent(room, { type: "note-remove", note: b, at: 22, id: "p2" }),
+    true,
+    "Ben still sees both notes, but his removal must not resurrect A",
+  );
+  assertEquals(room.notes, []);
+});
+
+Deno.test("note-remove obeys the same ownership rule as notes-set", () => {
+  const room = roomWith("Ana", "Ben");
+  const anas = { date: "2026-07-14", text: "mine", who: "Ana", at: 1 };
+  const anon = { date: "2026-07-16", text: "anon", who: "", at: 2 };
+  applyEvent(room, { type: "notes-set", notes: [anas, anon], at: 3 });
+  assertEquals(
+    applyEvent(room, { type: "note-remove", note: anas, at: 4, id: "p2" }),
+    false,
+    "Ben cannot drop Ana's note",
+  );
+  assertEquals(
+    applyEvent(room, { type: "note-remove", note: anas, at: 5, id: "ghost" }),
+    false,
+    "unknown editors cannot edit at all",
+  );
+  assertEquals(applyEvent(room, { type: "note-remove", note: anas, at: 6, id: "p1" }), true);
+  assertEquals(
+    applyEvent(room, { type: "note-remove", note: anon, at: 7, id: "p2" }),
+    true,
+    "author-less notes are anyone's",
+  );
+  assertEquals(room.notes, []);
+});
+
+Deno.test("note-add rejects junk and the cap; removing a vanished note is a no-op", () => {
+  const room = roomWith("Ana");
+  const bad = (note: unknown) => applyEvent(room, { type: "note-add", note, at: 1, id: "p1" });
+  assertEquals(bad({ date: "nope", text: "x" }), false, "bad date");
+  assertEquals(bad({ date: "2026-08-20", text: "   " }), false, "blank text");
+  const note = { date: "2026-08-20", text: "once", who: "Ana", at: 1 };
+  assertEquals(applyEvent(room, { type: "note-add", note, at: 2, id: "p1" }), true);
+  assertEquals(applyEvent(room, { type: "note-remove", note, at: 3, id: "p1" }), true);
+  assertEquals(
+    applyEvent(room, { type: "note-remove", note, at: 4, id: "p1" }),
+    false,
+    "the other client already removed it — nothing left to do",
+  );
+  applyEvent(room, {
+    type: "notes-set",
+    notes: Array.from({ length: LIMITS.notes }, (_, i) => ({
+      date: "2026-08-20",
+      text: `n${i}`,
+      who: "",
+      at: i + 1,
+    })),
+    at: 5,
+  });
+  assertEquals(
+    applyEvent(room, {
+      type: "note-add",
+      note: { date: "2026-08-20", text: "one too many", who: "Ana", at: 999 },
+      at: 6,
+      id: "p1",
+    }),
+    false,
+    "a full room takes no more notes",
+  );
+});
+
+Deno.test("notes-sweep ages out stale notes whoever wrote them", () => {
+  const room = roomWith("Ana", "Ben");
+  const stale = { date: "2026-07-07", text: "long past", who: "Ben", at: 1 };
+  const keeper = { date: "2026-07-15", text: "on the cutoff", who: "Ben", at: 2 };
+  applyEvent(room, { type: "notes-set", notes: [stale, keeper], at: 3 });
+  // note-remove would refuse this — it is Ben's note and Ben isn't doing it.
+  assertEquals(
+    applyEvent(room, { type: "note-remove", note: stale, at: 4, id: "p1" }),
+    false,
+    "Ana cannot delete Ben's note by hand",
+  );
+  assertEquals(
+    applyEvent(room, { type: "notes-sweep", cutoff: "2026-07-15", at: 5 }),
+    true,
+    "but it can age out",
+  );
+  assertEquals(room.notes.map((n) => n.text), ["on the cutoff"]);
+  assertEquals(room.notesAt, 5);
+});
+
+Deno.test("notes-sweep is a no-op when nothing has expired, and needs a real cutoff", () => {
+  const room = roomWith("Ana");
+  const fresh = { date: "2026-08-10", text: "recent", who: "Ana", at: 1 };
+  applyEvent(room, { type: "notes-set", notes: [fresh], at: 2 });
+  assertEquals(
+    applyEvent(room, { type: "notes-sweep", cutoff: "2026-07-15", at: 3 }),
+    false,
+    "nothing aged out, so the room did not change",
+  );
+  assertEquals(room.notesAt, 2, "a no-op sweep must not bump the edit clock");
+  assertEquals(
+    applyEvent(room, { type: "notes-sweep", cutoff: "whenever", at: 4 }),
+    false,
+    "a malformed cutoff sweeps nothing rather than everything",
+  );
+  assertEquals(applyEvent(room, { type: "notes-sweep", at: 5 }), false, "missing cutoff");
+  assertEquals(room.notes.length, 1);
+});
+
+Deno.test("noteCutoff reads back one month and rejects nothing on its own", () => {
+  assertEquals(noteCutoff(new Date(2026, 7, 15)), "2026-07-15"); // 15 Aug -> 15 Jul
+  assertEquals(noteCutoff(new Date(2026, 0, 9)), "2025-12-09", "crosses the year");
+  // A day February lacks rolls forward — documented, and harmless for retention.
+  assertEquals(noteCutoff(new Date(2026, 2, 31)), "2026-03-03");
+});
+
+Deno.test("freshNotes drops notes dated before the cutoff and keeps the rest", () => {
+  const notes = sanitizeNotes([
+    { date: "2026-05-01", text: "long gone", at: 1 },
+    { date: "2026-07-14", text: "a day too old", at: 2 },
+    { date: "2026-07-15", text: "on the cutoff", at: 3 },
+    { date: "2026-08-20", text: "recent", at: 4 },
+    { date: "2026-12-01", text: "future reminder", at: 5 },
+  ]);
+  assertEquals(freshNotes(notes, "2026-07-15").map((n) => n.text), [
+    "on the cutoff",
+    "recent",
+    "future reminder",
+  ]);
+  // Age is the note's own date, never `at` — an unstamped note stays put.
+  assertEquals(
+    freshNotes(sanitizeNotes([{ date: "2026-08-20", text: "no stamp" }]), "2026-07-15").length,
+    1,
+  );
+  assertEquals(freshNotes(notes, "2027-01-01"), []);
+  assertEquals(freshNotes([], "2026-07-15"), []);
 });
 
 Deno.test("notes-set replaces the list; identical sets are no-ops; reset leaves notes", () => {

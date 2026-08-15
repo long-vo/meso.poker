@@ -97,6 +97,8 @@ export function isAway(status) {
  *   observer?: boolean,
  *   status?: string,
  *   notes?: unknown[],
+ *   note?: unknown,
+ *   cutoff?: string,
  *   password?: string,
  *   at?: number,
  * }} RoomEvent
@@ -171,6 +173,35 @@ export function sanitizeNotes(raw) {
   }
   notes.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : a.at - b.at));
   return notes;
+}
+
+/**
+ * Notes worth keeping: those dated on or after `cutoff`. Age is the note's own
+ * date, not when it was typed — a note pinned to next month is a reminder, and
+ * `at` is 0 on any note that reached us without a creation stamp, which would
+ * make every one of them look ancient. The cutoff is passed in so the rule
+ * stays pure (and testable) with the clock left at the caller's edge.
+ * @param {Note[]} notes
+ * @param {string} cutoff YYYY-MM-DD
+ * @returns {Note[]}
+ */
+export function freshNotes(notes, cutoff) {
+  return notes.filter((note) => note.date >= cutoff);
+}
+
+/**
+ * The date a note must reach to survive: one month before `on`. Shared so the
+ * server's sweep and the client's re-seed prune can't drift apart. A day the
+ * previous month lacks rolls forward (31 Mar reads back to 3 Mar), moving the
+ * edge by a couple of days a few times a year — immaterial for retention.
+ * @param {Date} [on] defaults to now
+ * @returns {string} YYYY-MM-DD
+ */
+export function noteCutoff(on = new Date()) {
+  const d = new Date(on.getTime());
+  d.setMonth(d.getMonth() - 1);
+  const pad = (/** @type {number} */ n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 }
 
 /** Shape of a room PIN: exactly four digits (shared by server and UI). */
@@ -344,6 +375,54 @@ export function applyEvent(room, event) {
         if (removedForeign) return false;
       }
       room.notes = notes;
+      room.notesAt = event.at ?? Date.now();
+      return true;
+    }
+    // Single-note edits. A whole-list `notes-set` asserts "the list is exactly
+    // this", so two people editing from the same view each erase the other's
+    // change: one add trips the ownership check above and is refused outright,
+    // and one removal is undone by the other's stale list. These carry only the
+    // delta, so concurrent edits compose. `notes-set` stays for bulk work —
+    // the client re-seeding a room from its saved copy.
+    case "note-add": {
+      const [note] = sanitizeNotes([event.note]);
+      if (!note) return false;
+      if (event.id !== undefined && !room.participants[String(event.id)]) return false;
+      if (room.notes.length >= LIMITS.notes) return false;
+      room.notes = sanitizeNotes([...room.notes, note]);
+      room.notesAt = event.at ?? Date.now();
+      return true;
+    }
+    // Age-out sweep, applied whenever someone joins. Nobody's note is being
+    // taken from them — the date has simply passed — so this is not a deletion
+    // by an editor: it carries no author check, which is what lets a stale note
+    // go even though the person who wrote it isn't the one in the room. The
+    // cutoff is supplied by the caller (the server's clock, never a client's).
+    case "notes-sweep": {
+      const cutoff = String(event.cutoff ?? "");
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(cutoff)) return false;
+      const kept = freshNotes(room.notes, cutoff);
+      if (kept.length === room.notes.length) return false;
+      room.notes = kept;
+      room.notesAt = event.at ?? Date.now();
+      return true;
+    }
+    case "note-remove": {
+      const [target] = sanitizeNotes([event.note]);
+      if (!target) return false;
+      // Both sides come from sanitizeNotes, so their keys are in the same
+      // order and stringify compares equal for equal notes.
+      const key = JSON.stringify(target);
+      const index = room.notes.findIndex((note) => JSON.stringify(note) === key);
+      // Already gone: someone else removed it first, so there is nothing to do
+      // — not an error, just no change.
+      if (index === -1) return false;
+      if (event.id !== undefined) {
+        const editor = room.participants[String(event.id)];
+        if (!editor) return false;
+        if (target.who !== "" && target.who !== editor.name) return false;
+      }
+      room.notes = room.notes.filter((_, i) => i !== index);
       room.notesAt = event.at ?? Date.now();
       return true;
     }

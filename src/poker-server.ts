@@ -15,7 +15,10 @@
  *                     { type: "wheel-set", names } | { type: "wheel-spin", winner }
  *                     { type: "theme", theme }    theme: a CARD_THEMES id
  *                     { type: "status", status }  status: a STATUSES id or ""
+ *                     { type: "note-add", note } | { type: "note-remove", note }
  *                     { type: "notes-set", notes }  notes: full replacement list
+ *                       (bulk only — re-seeding a room; single edits use the
+ *                       two above so concurrent editors don't erase each other)
  *                     { type: "react", emoji }    emoji: a REACTIONS entry
  *                     { type: "nudge", name }     name: a non-voter to poke
  *   server -> client: { type: "state", room, state }  (see publicState)
@@ -37,6 +40,7 @@ import {
   isAway,
   LIMITS,
   mergeRooms,
+  noteCutoff,
   publicState,
   REACTIONS,
   sanitizePin,
@@ -343,6 +347,7 @@ function handleClientMessage(code: string, room: LocalRoom, id: string, raw: str
     emoji?: unknown;
     name?: unknown;
     notes?: unknown;
+    note?: unknown;
   };
   try {
     message = JSON.parse(raw);
@@ -427,6 +432,17 @@ function handleClientMessage(code: string, room: LocalRoom, id: string, raw: str
     case "notes-set": {
       const notes = Array.isArray(message.notes) ? message.notes : [];
       if (applyEvent(room.state, { type: "notes-set", notes, id, at: Date.now() })) {
+        broadcast(code, room);
+        pushState(code, room);
+      }
+      return;
+    }
+    // Single-note edits, so two people writing at once don't erase each other
+    // (see the reducer). The note is passed through unchecked — sanitizeNotes
+    // there is what decides whether it is well-formed.
+    case "note-add":
+    case "note-remove": {
+      if (applyEvent(room.state, { type: message.type, note: message.note, id, at: Date.now() })) {
         broadcast(code, room);
         pushState(code, room);
       }
@@ -554,6 +570,11 @@ export function handlePokerSocket(req: Request): Response {
     }
     room.clients.set(id, socket);
     room.seen.set(id, Date.now());
+    // Age out old notes on every join, not just when a room is re-seeded from
+    // scratch: a room that stays busy never goes empty, so the client-side
+    // prune alone would never reach it. A no-op when nothing has expired, and
+    // the join's own broadcast below carries the result.
+    applyEvent(room.state, { type: "notes-sweep", cutoff: noteCutoff(), at: Date.now() });
     // `hello` asks sibling isolates to answer with their snapshots so a
     // freshly-opened room catches up on participants, story and reveal state.
     broadcast(code, room, isNewHere ? { hello: true } : undefined);
