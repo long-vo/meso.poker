@@ -309,3 +309,83 @@ Deno.test("a client that sends no cid still gets a seat", async () => {
   await mai.close();
   await server.shutdown();
 });
+
+/* --------------- regressions: who may open a socket, and how often -------- */
+
+/** Hand-roll the upgrade so an arbitrary Origin can be sent, and report the
+ *  status line — the origin check answers before the socket ever opens. */
+async function upgradeStatus(port: number, origin: string | null): Promise<string> {
+  const key = btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(16))));
+  const conn = await Deno.connect({ hostname: "127.0.0.1", port });
+  await conn.write(
+    utf8.encode(
+      `GET /api/poker/ws?room=ORIG&name=Long HTTP/1.1\r\n` +
+        `Host: 127.0.0.1:${port}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n` +
+        `Sec-WebSocket-Key: ${key}\r\nSec-WebSocket-Version: 13\r\n` +
+        (origin === null ? "" : `Origin: ${origin}\r\n`) + `\r\n`,
+    ),
+  );
+  const buf = new Uint8Array(256);
+  const n = await conn.read(buf);
+  const status = new TextDecoder().decode(buf.subarray(0, n ?? 0)).split("\r\n")[0];
+  try {
+    conn.close();
+  } catch { /* already gone */ }
+  return status;
+}
+
+Deno.test("a cross-origin page cannot open a room socket", async () => {
+  const { server, port } = startServer();
+  // WebSockets are exempt from CORS, so without the check any page the user
+  // happens to have open could drive their browser into our rooms.
+  assertEquals(await upgradeStatus(port, "https://evil.example"), "HTTP/1.1 403 Forbidden");
+  // The server's own page, and a non-browser client that sends no Origin.
+  assertEquals(
+    await upgradeStatus(port, `http://127.0.0.1:${port}`),
+    "HTTP/1.1 101 Switching Protocols",
+  );
+  assertEquals(await upgradeStatus(port, null), "HTTP/1.1 101 Switching Protocols");
+  await server.shutdown();
+});
+
+/** Try to join with a PIN; resolve with whatever the server said. */
+function attemptJoin(port: number, room: string, name: string, pin: string): Promise<string> {
+  const ws = new WebSocket(
+    `ws://127.0.0.1:${port}/api/poker/ws?room=${room}&name=${name}&pin=${pin}`,
+  );
+  return new Promise((resolve) => {
+    let result = "no answer";
+    ws.onmessage = (e) => {
+      const msg = JSON.parse(e.data);
+      if (msg.type === "error") result = msg.message;
+      else if (msg.type === "state") result = "joined";
+      ws.close();
+    };
+    ws.onclose = () => resolve(result);
+    ws.onerror = () => resolve(result);
+  });
+}
+
+Deno.test("a room stops answering PIN guesses once they come too fast", async () => {
+  const { server, port } = startServer();
+  // The first joiner sets the PIN. The room outlives their socket (an emptied
+  // room is only dropped after EMPTY_ROOM_TTL_MS), so the counter survives too.
+  assertEquals(await attemptJoin(port, "PINNED", "Long", "1234"), "joined");
+
+  // A guess or two is someone fumbling their own room's PIN, and still answered.
+  assertEquals(
+    await attemptJoin(port, "PINNED", "Mai", "0000"),
+    "This room needs its 4-digit PIN.",
+  );
+
+  // A sweep is not. 10,000 PINs used to be minutes of scripted connects.
+  for (let i = 0; i < 9; i++) await attemptJoin(port, "PINNED", "Bot", "0000");
+
+  const throttled = "Too many wrong PINs for this room — wait a minute and try again.";
+  assertEquals(await attemptJoin(port, "PINNED", "Bot", "0000"), throttled);
+  // Refused even when right: a limit that still answers every guess correctly
+  // is just a slower oracle.
+  assertEquals(await attemptJoin(port, "PINNED", "Long", "1234"), throttled);
+
+  await server.shutdown();
+});

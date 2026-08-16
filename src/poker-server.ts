@@ -59,6 +59,8 @@ interface LocalRoom {
   seen: Map<string, number>;
   /** Recent relay-message timestamps per local client (rate limiting). */
   relayAt: Map<string, number[]>;
+  /** Recent wrong-PIN timestamps for this room (see PIN_FAIL_MAX). */
+  pinFails: number[];
   /** Latest snapshot from each sibling isolate. */
   remotes: Map<string, { state: Room; seenAt: number }>;
   /** Typed via setTimeout so it works whether Deno resolves web or Node timer types. */
@@ -89,7 +91,21 @@ interface RelayMessage {
 }
 
 const MAX_ROOMS = 500;
+// Rooms are capped, sockets were not: one client could hold open as many as it
+// liked. Counted from the room map rather than a counter, so a socket the
+// heartbeat reaps without an onclose cannot leak a slot.
+const MAX_SOCKETS = 2000;
 const MAX_MESSAGE_BYTES = 4096;
+// A room PIN is four digits — 10,000 of them — and the join that checks it had
+// no limit at all, so the whole space was minutes of scripted connects. Ten
+// wrong PINs inside the window and the room stops answering guesses until it
+// drains, which puts a full sweep beyond half a day.
+//
+// The trade-off is deliberate: someone who knows the room code can keep a room
+// throttled by guessing at it. That costs the team a minute at a time and is
+// visible in the error they get; an unthrottled 4-digit PIN costs them the room.
+const PIN_FAIL_WINDOW_MS = 60_000;
+const PIN_FAIL_MAX = 10;
 const utf8 = new TextEncoder();
 // Reactions/nudges per client within the sliding window; beyond it they're
 // silently dropped so one keyboard-mash can't flood every screen in the room.
@@ -147,12 +163,58 @@ function getRoom(code: string): LocalRoom {
       clients: new Map(),
       seen: new Map(),
       relayAt: new Map(),
+      pinFails: [],
       remotes: new Map(),
     };
     rooms.set(code, room);
   }
   clearTimeout(room.emptyTimer);
   return room;
+}
+
+/** Open sockets across every room on this isolate. */
+function totalSockets(): number {
+  let open = 0;
+  for (const room of rooms.values()) open += room.clients.size;
+  return open;
+}
+
+/**
+ * Extra origins allowed to open a room socket, comma-separated. The server's
+ * own host and localhost are always allowed, so this is only needed if the UI
+ * is ever served from somewhere else.
+ */
+const EXTRA_ORIGINS = (Deno.env.get("ALLOWED_ORIGINS") ?? "")
+  .split(",")
+  .map((origin) => origin.trim())
+  .filter((origin) => origin !== "");
+
+/**
+ * Whether a socket request may be opened from the page that asked for it.
+ *
+ * WebSockets are exempt from CORS, so without this check any page a colleague
+ * happens to visit can open sockets to this server — join rooms, rewrite the
+ * story, and grind a room's PIN — using their browser as the client.
+ *
+ * Compared by host rather than by full origin: behind Render's proxy the
+ * request URL this process sees is plain http on the internal port, while the
+ * browser sends the public https origin, and a full-origin match would reject
+ * every real user. A request carrying no Origin at all is not a browser
+ * cross-site request (curl, the socket tests) and passes.
+ */
+function originAllowed(req: Request, url: URL): boolean {
+  const origin = req.headers.get("origin");
+  if (origin === null || origin === "") return true;
+  if (EXTRA_ORIGINS.includes(origin)) return true;
+  let host: string;
+  try {
+    ({ host } = new URL(origin));
+  } catch {
+    return false; // an unparsable Origin is not one we put there
+  }
+  if (host === url.host) return true;
+  const name = host.split(":")[0];
+  return name === "localhost" || name === "127.0.0.1" || name === "[::1]";
 }
 
 /** Sliding-window rate limit shared by all relay messages from one client. */
@@ -518,8 +580,14 @@ export function handlePokerSocket(req: Request): Response {
   if (req.headers.get("upgrade")?.toLowerCase() !== "websocket") {
     return json({ error: "Expected a WebSocket upgrade request." }, 426);
   }
+  if (!originAllowed(req, url)) {
+    return json({ error: "Cross-origin socket requests are not accepted." }, 403);
+  }
   if (!rooms.has(code) && rooms.size >= MAX_ROOMS) {
     return json({ error: "Too many active rooms — try again later." }, 503);
+  }
+  if (totalSockets() >= MAX_SOCKETS) {
+    return json({ error: "Too many open connections — try again later." }, 503);
   }
 
   const { socket, response } = Deno.upgradeWebSocket(req);
@@ -535,11 +603,28 @@ export function handlePokerSocket(req: Request): Response {
     // merged view sees a PIN set on a sibling isolate; an uninitialised room
     // (password null/"") lets this join through to set — or skip — the PIN.
     const merged = mergeRooms(room.state, [...room.remotes.values()].map((r) => r.state));
-    if (merged.password && pin !== merged.password) {
-      send(socket, { type: "error", reason: "pin", message: "This room needs its 4-digit PIN." });
-      socket.close(1008, "wrong pin");
-      if (room.clients.size === 0) scheduleCleanup(code, room);
-      return;
+    if (merged.password) {
+      const now = Date.now();
+      room.pinFails = room.pinFails.filter((at) => now - at < PIN_FAIL_WINDOW_MS);
+      // Checked before the comparison, not after it: a limit that still answers
+      // "wrong" for every guess is not a limit, it is a slower oracle.
+      if (room.pinFails.length >= PIN_FAIL_MAX) {
+        send(socket, {
+          type: "error",
+          reason: "pin",
+          message: "Too many wrong PINs for this room — wait a minute and try again.",
+        });
+        socket.close(1008, "pin throttled");
+        if (room.clients.size === 0) scheduleCleanup(code, room);
+        return;
+      }
+      if (pin !== merged.password) {
+        room.pinFails.push(now);
+        send(socket, { type: "error", reason: "pin", message: "This room needs its 4-digit PIN." });
+        socket.close(1008, "wrong pin");
+        if (room.clients.size === 0) scheduleCleanup(code, room);
+        return;
+      }
     }
     if (
       !applyEvent(room.state, {
