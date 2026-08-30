@@ -36,6 +36,12 @@
  * has refreshed the session for LIVE_TTL_MS, so an isolate whose own slice
  * emptied first cannot close a room its siblings are still serving (which would
  * strand the survivors into a second session for the same room).
+ *
+ * A session can also end with no cleanup timer left to close it: the server
+ * keeps an empty room for longer than LIVE_TTL_MS, so a rejoin can cancel that
+ * timer and still be late enough to start a new session. Claiming the pointer
+ * therefore closes the session it moves off — nothing can reach a record once
+ * the pointer no longer names it.
  */
 
 /** Rolling window the endpoint reports on. */
@@ -233,11 +239,37 @@ export async function writeRoomActivity(
     participants,
     peakParticipants: participants,
   };
-  await handle.atomic()
+  const claim = handle.atomic()
     .check({ key: liveKey(code), versionstamp: pointer.versionstamp })
     .set(liveKey(code), { startedAt: now }, { expireIn: WINDOW_MS })
-    .set(sessionKey(code, now), record, { expireIn: WINDOW_MS })
-    .commit();
+    .set(sessionKey(code, now), record, { expireIn: WINDOW_MS });
+
+  // Retire the session this pointer still names. Nothing has refreshed it for
+  // LIVE_TTL_MS, so it is over — but no cleanup timer is coming for it either:
+  // a rejoin inside the server's 5-minute empty-room grace period cancels the
+  // timer that would have closed it (`getRoom` in poker-server.ts), and a
+  // killed process never got to set one. Once the pointer moves the record is
+  // unreachable — `writeRoomClosed` only ever resolves a session through the
+  // pointer — so leaving it would strand it as "created but never closed" for
+  // the rest of the window. Closed at its last refresh, which is when the room
+  // actually emptied. Checking its versionstamp too keeps a sibling that
+  // refreshed it a moment ago from losing that refresh: the commit fails, and
+  // the next heartbeat sees a live session and simply refreshes it.
+  if (pointer.value) {
+    const key = sessionKey(code, pointer.value.startedAt);
+    const previous = await handle.get<RoomRecord>(key);
+    if (isRecord(previous.value) && previous.value.destroyedAt === null) {
+      const closed: RoomRecord = {
+        ...previous.value,
+        destroyedAt: previous.value.lastSeenAt,
+        participants: 0,
+      };
+      claim.check({ key, versionstamp: previous.versionstamp })
+        .set(key, closed, { expireIn: WINDOW_MS });
+    }
+  }
+
+  await claim.commit();
 }
 
 /**

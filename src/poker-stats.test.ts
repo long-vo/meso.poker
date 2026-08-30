@@ -270,3 +270,25 @@ Deno.test("storage: closing is not repeated once a session is closed", async () 
   assertEquals(only.destroyedAt, NOW + 5 * MINUTE, "the first close stands");
   kv.close();
 });
+
+Deno.test("storage: a session the pointer moves off is closed, not orphaned", async () => {
+  const kv = await freshKv();
+  // Someone joins, stays a minute and a half, then leaves — the leave records
+  // the empty room and the server arms its 5-minute cleanup timer.
+  await writeRoomActivity(kv, "QK7M", 1, NOW);
+  await writeRoomActivity(kv, "QK7M", 0, NOW + 94_000);
+  // They come back 220s later. That is inside the server's grace period, so
+  // `getRoom` cancels the cleanup timer and no close is ever written for this
+  // stretch — but past LIVE_TTL_MS, so a new session takes the pointer over.
+  await writeRoomActivity(kv, "QK7M", 1, NOW + 220_000);
+
+  const [first, second] = await sessions(kv, "QK7M");
+  assertEquals(
+    first.destroyedAt,
+    NOW + 94_000,
+    "the superseded session ends when its last player left",
+  );
+  assertEquals(first.participants, 0);
+  assertEquals(second.destroyedAt, null, "the session taking the pointer over stays open");
+  kv.close();
+});
