@@ -19,16 +19,27 @@
  *   3. Edit ENDPOINT below if you are not pointing at the Render deployment.
  *   4. Run installTrigger() once, and approve the two scopes it asks for
  *      (external fetch + this spreadsheet). syncMesoPokerRooms() then runs
- *      every 10 minutes.
+ *      every 10 minutes, weekdays 08:00-20:00.
  *
  * Why 10 minutes: it has to beat the shortest window in which a session can be
  * lost. On Render's free plan the instance spins down after ~15 minutes idle and
  * its stats database goes with it, so a slower poll would silently miss rooms.
  * Polling every 10 minutes also keeps the instance awake, which is what stops
- * that spin-down happening at all. Two consequences worth knowing: the service
- * then runs ~730 instance-hours a month, which is most of the free tier's 750,
- * and on Deno Deploy (managed, durable KV) none of this applies — an hourly or
- * daily trigger is plenty there.
+ * that spin-down happening at all. On Deno Deploy (managed, durable KV) none of
+ * this applies — an hourly or daily trigger is plenty there.
+ *
+ * Why only weekdays, 08:00-20:00: staying awake around the clock costs ~730
+ * instance-hours a month against a free tier of 750. Skipping Saturday and
+ * Sunday brings that to ~520, and skipping the nights as well to ~260. The cost
+ * is that a room opened outside the window is never logged — the poll stops, the
+ * instance spins down, and the session goes with it. A room still open at the
+ * last poll of the day keeps whatever that poll saw: live, no destroyedAt, for
+ * good.
+ *
+ * The check sits in syncMesoPokerRooms() rather than in the trigger because Apps
+ * Script cannot narrow everyMinutes() with onWeekDay(), and has no notion of an
+ * hour range at all. The window follows the script's timezone, under Project
+ * Settings.
  */
 
 /** The deployment to poll. */
@@ -37,6 +48,9 @@ const ENDPOINT = "https://meso-poker.onrender.com/api/poker/stats";
 const SHEET_NAME = "Rooms";
 /** Script property holding the bearer token (never the token itself). */
 const TOKEN_PROPERTY = "MESO_POKER_STATS_TOKEN";
+/** Polling window: from START_HOUR up to, but not including, END_HOUR. */
+const START_HOUR = 8;
+const END_HOUR = 20;
 
 const HEADERS = [
   "code",
@@ -56,6 +70,16 @@ const HEADERS = [
  * duplicating it.
  */
 function syncMesoPokerRooms() {
+  // getDay(): 0 Sunday, 6 Saturday. getHours(): 0-23. Both read the script's
+  // timezone, so the window is local time. See the header.
+  const now = new Date();
+  const day = now.getDay();
+  const hour = now.getHours();
+  if (day === 0 || day === 6 || hour < START_HOUR || hour >= END_HOUR) {
+    console.log("meso.poker sync: outside the polling window, nothing to do.");
+    return;
+  }
+
   const token = PropertiesService.getScriptProperties().getProperty(TOKEN_PROPERTY);
   if (!token) {
     throw new Error(
@@ -121,7 +145,10 @@ function syncMesoPokerRooms() {
   );
 }
 
-/** Install (or replace) the 10-minute trigger. Run once, by hand. */
+/**
+ * Install (or replace) the 10-minute trigger. Run once, by hand. The trigger
+ * itself fires around the clock; runs outside the window return immediately.
+ */
 function installTrigger() {
   for (const trigger of ScriptApp.getProjectTriggers()) {
     if (trigger.getHandlerFunction() === "syncMesoPokerRooms") {
@@ -129,7 +156,10 @@ function installTrigger() {
     }
   }
   ScriptApp.newTrigger("syncMesoPokerRooms").timeBased().everyMinutes(10).create();
-  console.log("Trigger installed: syncMesoPokerRooms every 10 minutes.");
+  console.log(
+    "Trigger installed: syncMesoPokerRooms every 10 minutes, weekdays " +
+      START_HOUR + ":00-" + END_HOUR + ":00.",
+  );
 }
 
 /* -------------------------------- helpers -------------------------------- */
