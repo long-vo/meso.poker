@@ -232,12 +232,21 @@ const CLIENT_ID = (() => {
  * answers, a server exists and the initial WebSocket is retried patiently —
  * free-tier hosts (e.g. Render) spin down when idle and need ~30–60 s to
  * wake. Only when the initial window runs out does `handlers.fail()` give up.
+ * A socket that drops later is redialled with a short backoff, except once the
+ * tab has been hidden for an hour: then it stays down until the tab is shown
+ * again (see HIDDEN_PAUSE_MS).
  */
 const INITIAL_WINDOW_MS = 90_000; // Render free tier can take 30–60s to wake
 // While connected, ping /health so a free-tier host sees inbound HTTP traffic
 // and doesn't spin down mid-game (Render idles out after ~15 min without it;
 // WebSocket frames alone may not count). Runs only while a room is open.
 const KEEP_ALIVE_MS = 5 * 60_000;
+// A tab hidden this long is abandoned for the night: a laptop asleep with the
+// room open, a background tab nobody comes back to. Its socket drops when the
+// machine sleeps, and each maintenance wake would otherwise redial, rejoin the
+// room and wake a spun-down free-tier server for another 15 min. Past this
+// mark a dropped socket stays down until the tab is shown again.
+const HIDDEN_PAUSE_MS = 60 * 60_000;
 function connectLive(code, name, observer, pin, handlers) {
   let socket = null;
   let everOpened = false;
@@ -247,6 +256,8 @@ function connectLive(code, name, observer, pin, handlers) {
   let pingTimer = 0;
   let keepAliveTimer = 0;
   let firstTryAt = 0; // set once the health probe confirms a server
+  let hiddenSince = document.hidden ? Date.now() : 0; // when the tab went hidden
+  let paused = false; // a redial skipped because the tab was hidden too long
 
   const open = () => {
     const proto = location.protocol === "https:" ? "wss" : "ws";
@@ -296,9 +307,37 @@ function connectLive(code, name, observer, pin, handlers) {
         return;
       }
       handlers.down();
-      retryTimer = setTimeout(open, Math.min(10_000, 1500 * attempts));
+      redial(Math.min(10_000, 1500 * attempts));
     };
   };
+
+  // Redial after `delay`, unless by the time the timer fires the tab has been
+  // hidden for HIDDEN_PAUSE_MS: then park until it is shown again. Decided at
+  // fire time rather than at close, because a hidden tab's timers run late
+  // and a sleeping machine's not at all, so the wall clock may have jumped
+  // hours in between.
+  const redial = (delay) => {
+    retryTimer = setTimeout(() => {
+      if (hiddenSince && Date.now() - hiddenSince >= HIDDEN_PAUSE_MS) {
+        paused = true;
+        return;
+      }
+      open();
+    }, delay);
+  };
+
+  const onVisibility = () => {
+    if (document.hidden) {
+      if (!hiddenSince) hiddenSince = Date.now();
+      return;
+    }
+    hiddenSince = 0;
+    if (paused) {
+      paused = false;
+      open();
+    }
+  };
+  document.addEventListener("visibilitychange", onVisibility);
 
   const send = (message) => {
     if (socket && socket.readyState === WebSocket.OPEN) {
@@ -331,6 +370,7 @@ function connectLive(code, name, observer, pin, handlers) {
       clearTimeout(retryTimer);
       clearInterval(pingTimer);
       clearInterval(keepAliveTimer);
+      document.removeEventListener("visibilitychange", onVisibility);
       // Announce the leave as a data frame first: proxies relay it instantly,
       // while the close handshake itself can take ~10s to reach the server.
       send({ type: "leave" });

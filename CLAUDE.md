@@ -53,7 +53,9 @@ local dev) the channel is quiet and everything still works — don't break this 
 
 **Client resilience.** `static/poker.js` probes `GET /health` first: no answer means static hosting
 → instant solo mode; an answer means a real server → the initial WebSocket retries up to 90 s
-(free-tier cold starts), and an open room pings `/health` every 5 min to keep the instance awake.
+(free-tier cold starts), and an open room pings `/health` every 5 min to keep the instance awake. A
+socket dropped after the tab has been hidden for an hour is not redialled until the tab is shown
+again, so a sleeping laptop's maintenance wakes don't rejoin the room and wake the instance hourly.
 Wire protocol is documented at the top of `poker-server.ts`.
 
 **Server events vs. client events.** Clients never send `join` — the server synthesizes it from the
