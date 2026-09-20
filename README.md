@@ -39,7 +39,9 @@ never disagree on the rules. When no server is reachable, the page falls back to
 The client first probes `GET /health`: a miss means static hosting (instant solo fallback); an
 answer means a server exists, and the initial WebSocket is retried for up to 90 s — free-tier hosts
 spin down when idle and need ~30–60 s to wake. While a room is open, the page pings `/health` every
-5 minutes so the host sees inbound traffic and keeps the instance alive mid-game.
+5 minutes so the host sees inbound traffic and keeps the instance alive mid-game. A socket dropped
+while the tab has been hidden for an hour is not redialled until the tab is shown again, so a laptop
+asleep with a room open doesn't rejoin, and wake the instance, on every maintenance wake.
 
 On Deno Deploy, sockets for one room may land on different isolates; a `BroadcastChannel` gossips
 per-isolate snapshots (participant maps are disjoint, shared flags resolve last-writer-wins) so
